@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Grail API",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "app.main:app",
+                "--reload",
+                "--port=8080"
+            ],
+            "jinja": true
+        },
+        {
+            "name": "Attach to SAM CLI",
+            "type": "debugpy",
+            "request": "attach",
+            "port": 5858,
+            "host": "localhost",
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/var/task"
+                }
+            ]
+        }
+    ]
+}

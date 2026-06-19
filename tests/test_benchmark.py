@@ -50,4 +50,5 @@ def test_production_benchmark(batch_size=10000):
     print(f"  🚀 Calculated Throughput:    {throughput:,.2f} options/second")
     print("==================================================\n")
 
-test_production_benchmark()
+if __name__ == "__main__":
+    test_production_benchmark()
