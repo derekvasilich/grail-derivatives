@@ -7,7 +7,7 @@
 
 A production-grade, high-availability Financial Engineering microservice designed to ingest high-volume derivative option contracts and orchestrate intensive mathematical valuations under extreme concurrency. This platform serves as a modern, secure cloud-native REST API wrapper executing stateless token rotation, validation, and data serialization over an elite, high-performance computing numerical matrix engine.
 
-🔒 Intellectual Property Boundary: This public repository contains the complete full-stack Python/FastAPI application layer, schema validations, OpenAPI specifications, and integration test suites. The underlying high-performance execution loops, multi-core OpenMP parallelization models, and O(N) tridiagonal numerical matrix solvers are maintained inside a proprietary, closed-source compiled machine-code shared library (.so) belonging exclusively to Dealer Gears Inc.
+> 🔒 Intellectual Property Boundary: This public repository contains the complete full-stack Python/FastAPI application layer, schema validations, OpenAPI specifications, and integration test suites. The underlying high-performance execution loops, multi-core OpenMP parallelization models, and O(N) tridiagonal numerical matrix solvers are maintained inside a proprietary, closed-source compiled machine-code shared library (.so) belonging exclusively to Dealer Gears Inc.
 
 ## 🚀 Core Architectural Moats
 ## 1. High-Performance FinOps & Zero-Copy Execution
@@ -30,7 +30,7 @@ Engineered for highly regulated financial sectors and corporate clearing operati
 * Middleware Signature Verification: Every transaction request must clear asynchronous signature token validation routines, verifying asymmetric cryptographic boundaries within secure network perimeters.
 
 ## 📡 API Routing Topology & Technical Overview
-
+```
        HTTPS Ingress (Cognito JWT Verification)
                          │
                          ▼
@@ -50,10 +50,11 @@ Engineered for highly regulated financial sectors and corporate clearing operati
                          ▼
  ┌────────────────────────────────────────────────────────┐
  │   Proprietary Compiled C++ OpenMP Shared Library (.so) │
- │   • Thomas Algorithm Solver    • Rannacher Damping    │
+ │   • Thomas Algorithm Solver    • Rannacher Damping     │
  └────────────────────────────────────────────────────────┘
-
-## 🔧 Production Endpoint Matrix## 🎯 POST /v1/pricing/single
+```
+## 🔧 Production Endpoint Matrix
+## 🎯 POST /v1/pricing/single
 Prices a single option layout instantly, executing a tight computational pass and returning only the compact, final Greeks (price, delta, gamma, theta, vega) without any dense surface-mesh overhead.
 ## ⚡ POST /v1/pricing/batch
 High-Throughput Sweep Pipeline: Price thousands of options concurrently over multi-core processor threads using contiguous vector streams. Features on-demand high-precision volatility bump-and-scale passes to compute exact Vega arrays.
