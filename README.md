@@ -63,7 +63,7 @@ On-Demand Visualization Engine: Computes the entire multi-dimensional asset-time
 
 ## 🛠️ Data Contract & Parameters
 The option schema supports native integer flag handling to route execution vectors seamlessly down to the compiled computational core loops:
-
+```
 {
   "deriv": 4, 
   "s": 100.0,
@@ -75,8 +75,7 @@ The option schema supports native integer flag handling to route execution vecto
   "Tn": 1000,
   "h": 1.0
 }
-
-
+```
 * deriv: 0 = VanillaCall, 1 = VanillaPut, 2 = AmericanCall, 3 = AmericanPut, 4 = BermudanCall, 5 = BermudanPut.
 * Tn: Number of temporal time grid increments (Matrix time-steps).
 * h: Spatial mesh coordinate spacing thickness (dx).
