@@ -91,7 +91,7 @@ The option schema supports native integer flag handling to route execution vecto
 ## 🔌 Technical Integration & API Specifications
 
 All resource endpoints are mounted under the global `/v1` version prefix. With the
-exception of the unauthenticated health probe and the raw binary ingress pipe, every
+exception of the unauthenticated health probe, every
 request must carry a valid AWS Cognito-issued OAuth2 JWT in the `Authorization: Bearer`
 header. The examples below assume a `localhost:8000` deployment and a `$TOKEN`
 environment variable holding your bearer token.
