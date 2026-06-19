@@ -99,7 +99,7 @@ def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression):
 
 @pytest.mark.asyncio
 async def test_grid_endpoint(image_regression):
-    response = await pricing.price_option_full_grid(config, DummyUser())
+    response = await pricing.price_option_full_grid(config)
     raw_binary_payload = b"".join([chunk async for chunk in response.body_iterator]) if hasattr(response, 'body_iterator') else b"".join([chunk for chunk in response.iter_bytes()])
     
     if response.status_code == 200:

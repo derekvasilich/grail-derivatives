@@ -11,17 +11,48 @@ from app.config import settings
 from app.auth.jwt import get_current_user
 from app.routers import health, pricing
 
+API_DESCRIPTION = """
+Production-grade options valuation pipeline powered by **C++ OpenMP core loops**.
+
+The engine prices Vanilla (European) contracts and path-dependent Exotics (American,
+Bermudan, single & double Barrier) by solving the Black–Scholes PDE on a 2D asset-time
+mesh via **Crank–Nicolson** discretization with **Rannacher damping** and an `O(N)`
+Thomas-algorithm tridiagonal solver.
+
+### Authentication
+All `/v1/pricing/*` routes require a valid **AWS Cognito OAuth2 JWT** sent as
+`Authorization: Bearer <token>`. The `/v1/health` probe is public.
+In local dev (empty `OAUTH2_JWKS_URL`) any unsigned JWT with a `sub` claim is accepted.
+
+### Response formats
+Routes return JSON Greeks, raw `float64` binary surfaces, or rendered PNG charts —
+see each endpoint's responses for the exact `Content-Type` and headers.
+"""
+
+OPENAPI_TAGS = [
+    {
+        "name": "Pricing",
+        "description": "Option valuation endpoints — single, batch, zero-copy binary, full "
+                       "surface grid, and rendered 3D chart. All require a bearer token.",
+    },
+    {
+        "name": "Health",
+        "description": "Public liveness & dependency probe. No authentication required.",
+    },
+]
+
 app = FastAPI(
     title="Grail Derivatives: Black-Scholes HPC FDM Pricing Engine",
-    description="Production-grade Options Valuation Pipeline Powered by C++ OpenMP Core Loops",
+    description=API_DESCRIPTION,
     version="1.0.0-BETA",
+    openapi_tags=OPENAPI_TAGS,
     docs_url="/docs",
     redoc_url="/redoc",
     swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect",
     swagger_ui_init_oauth={
         "usePkceWithAuthorizationCodeGrant": True,
         "clientId": settings.OAUTH2_AUDIENCE,
-    },  
+    },
 )
 
 # CORS

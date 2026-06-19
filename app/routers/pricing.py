@@ -6,20 +6,75 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from fastapi.responses import StreamingResponse
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status as http_status
 from app.api import OptionConfig, fdm_price_batch, fdm_price_single
 from app.schemas.pricing import CompactGreeksResponse, OptionConfigSchema
 
 router = APIRouter()
 
-@router.post("/pricing/batch", response_model=List[CompactGreeksResponse])
+# ------------------------------------------------------------------
+# Reusable OpenAPI response documentation shared across pricing routes.
+# FastAPI merges these into the generated Swagger / ReDoc schema so every
+# authenticated endpoint advertises the same auth + engine failure modes.
+# ------------------------------------------------------------------
+AUTH_RESPONSES: dict = {
+    401: {
+        "description": "**Unauthorized** — the request carried no bearer token, or the "
+                       "JWT failed asymmetric signature validation against the Cognito JWKS.",
+    },
+    403: {
+        "description": "**License Expired** — the proprietary compiled C++ pricing core "
+                       "rejected the call (engine status `-99`). Renew the engine license.",
+    },
+    422: {
+        "description": "**Validation Error** — one or more `OptionConfig` fields failed "
+                       "Pydantic schema validation (wrong type, missing `deriv`, etc.).",
+    },
+    500: {
+        "description": "**Engine Failure** — the C++ numerical solver returned a non-zero "
+                       "status mid-calculation (matrix instability or memory fault).",
+    },
+}
+
+VEGA_QUERY = Query(
+    False,
+    description=(
+        "When `true`, run the extra high-precision volatility **bump-and-reprice** passes "
+        "to populate `vega`. Left `false` by default because the additional re-solve roughly "
+        "doubles compute cost; `vega` is returned as `0.0` when skipped."
+    ),
+)
+
+
+@router.post(
+    "/pricing/batch",
+    response_model=List[CompactGreeksResponse],
+    tags=["Pricing"],
+    summary="Price a batch of options concurrently (JSON)",
+    response_description="A parallel array of compact Greeks — one entry per submitted config, in request order.",
+    responses={
+        400: {"description": "**Empty Batch** — the submitted JSON array contained zero option configs."},
+        **AUTH_RESPONSES,
+    },
+)
 async def price_options_batch(
     payload: List[OptionConfigSchema],
-    calculate_vega: bool = Query(False, description="Compute high-precision volatility bump-and-scale passes"),
+    calculate_vega: bool = VEGA_QUERY,
 ):
     """
-    ⚡ HIGH-THROUGHPUT SWEEP PIPE: Prices thousands of options concurrently 
-    over OpenMP multi-core processor threads using dense contiguous vector streams.
+    ⚡ **High-Throughput Sweep Pipe**
+
+    Prices an entire **array** of option contracts in a single round-trip, fanning the
+    workload across the OpenMP multi-core C++ loops using dense contiguous vector streams.
+    Ideal for risk-desk scenario sweeps and overnight revaluation jobs.
+
+    **Request body**: a JSON list of `OptionConfig` objects (see the schema below).
+
+    **Returns**: a `CompactGreeksResponse` list of identical length, index-aligned to the
+    input — element `i` of the response is the valuation of element `i` of the request.
+
+    **Throughput**: ~17,500+ options/sec on a typical multi-core node. For the absolute
+    lowest latency on very large books, prefer the zero-copy `POST /v1/pricing/binary` pipe.
     """
     batch_size = len(payload)
     if batch_size == 0:
@@ -41,7 +96,7 @@ async def price_options_batch(
     status, greeks_output_vector = fdm_price_batch(configs_vector, vega_flag)
     if status == -99:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="The underlying proprietary quantitative processing core license has expired."
         )
     if status != 0:
@@ -61,12 +116,55 @@ async def price_options_batch(
     ]
     return response
 
-@router.post("/pricing/binary")
+@router.post(
+    "/pricing/binary",
+    tags=["Pricing"],
+    summary="Zero-copy binary pricing pipe (octet-stream in/out)",
+    response_description="Raw octet-stream of packed Greeks structs — one per input config, in order.",
+    responses={
+        200: {
+            "description": "Binary buffer of computed Greeks structs, index-aligned to the input configs.",
+            "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+        },
+        400: {
+            "description": "**Misaligned Payload** — the body length is zero or not an exact "
+                           "multiple of `sizeof(OptionConfig)`, so the struct array cannot be reconstructed.",
+        },
+        **AUTH_RESPONSES,
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/octet-stream": {
+                    "schema": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "Contiguous little-endian array of packed C `OptionConfig` structs. "
+                                       "Total byte length MUST be an exact multiple of the struct size.",
+                    }
+                }
+            },
+        }
+    },
+)
 async def price_options_binary(request: Request):
     """
-    ⚡ INSTUTIONAL HIGH-THROUGHPUT PIPELINE:
-    Accepts a raw contiguous binary array of OptionConfig structs via a POST body.
-    Bypasses JSON completely, achieving absolute zero-copy execution speed.
+    ⚡ **Institutional High-Throughput Pipeline**
+
+    The fastest ingress path: accepts a raw, contiguous binary array of native C
+    `OptionConfig` structs as the POST body and pins a `ctypes` pointer **directly** onto
+    the socket buffer — bypassing JSON parsing entirely for absolute zero-copy execution.
+
+    **Request body** (`application/octet-stream`): tightly packed `OptionConfig` structs.
+    The total length must be an exact multiple of `sizeof(OptionConfig)` or the request is
+    rejected with `400`.
+
+    **Returns** (`application/octet-stream`): the raw Greeks struct buffer, one record per
+    input config, in the same order — ready to be `memcpy`'d straight back into a client array.
+
+    > ⚠️ This pipe trades JSON ergonomics for raw speed. Clients are responsible for matching
+    > the exact struct memory layout and endianness of the compiled engine.
     """
     # 1. Stream the raw byte chunk straight out of the network socket memory buffer
     raw_body_bytes = await request.body()
@@ -95,7 +193,7 @@ async def price_options_binary(request: Request):
     )
     if status == -99:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="The underlying proprietary quantitative processing core license has expired."
         )
     if status != 0:
@@ -109,14 +207,48 @@ async def price_options_binary(request: Request):
 
 
 # We remove the response_model=GridPricingResponse constraint to prevent JSON conversion
-@router.post("/pricing/grid")
+@router.post(
+    "/pricing/grid",
+    tags=["Pricing"],
+    summary="Compute the full 2D pricing surface (binary float64)",
+    response_description="Raw row-major float64 surface buffer; scalar Greeks and grid geometry are returned in X-* headers.",
+    responses={
+        200: {
+            "description": "Row-major `float64` array of the full `Tn × Xm` price surface. "
+                           "Scalar risk metrics travel out-of-band in custom response headers to keep the payload clean.",
+            "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+            "headers": {
+                "X-Price": {"description": "Option premium at spot, 8dp.", "schema": {"type": "string"}},
+                "X-Delta": {"description": "∂V/∂S, 8dp.", "schema": {"type": "string"}},
+                "X-Gamma": {"description": "∂²V/∂S², 8dp.", "schema": {"type": "string"}},
+                "X-Theta": {"description": "∂V/∂t, 8dp.", "schema": {"type": "string"}},
+                "X-Vega": {"description": "∂V/∂σ, 8dp.", "schema": {"type": "string"}},
+                "X-Grid-Rows-Tn": {"description": "Number of temporal rows (Tn) in the surface.", "schema": {"type": "integer"}},
+                "X-Grid-Cols-Xm": {"description": "Number of spatial columns (Xm) in the surface.", "schema": {"type": "integer"}},
+            },
+        },
+        **AUTH_RESPONSES,
+    },
+)
 async def price_option_full_grid(
     config: OptionConfigSchema,
 ):
     """
-    🌳 QUANT GRID ENGINE: Computes the entire 2D asset-time surface
-    and streams it back instantly as a raw binary byte array (float64) 
-    to prevent browser freezing and maximize transfer speeds.
+    🌳 **Quant Grid Engine**
+
+    Computes the **entire** 2D asset-time pricing surface in one solver pass and streams it
+    back as a raw `float64` binary buffer — deliberately avoiding JSON serialization of a
+    large matrix, which would otherwise freeze browsers and bloat transfer size.
+
+    **Request body**: a single `OptionConfig` object.
+
+    **Returns** (`application/octet-stream`): the surface as a flat, **row-major**
+    `Tn × Xm` array of 64-bit floats. Reconstruct it with the dimensions from the headers,
+    e.g. `numpy.frombuffer(body, dtype='<f8').reshape((Tn, Xm))`.
+
+    **Headers**: the scalar Greeks (`X-Price`, `X-Delta`, `X-Gamma`, `X-Theta`, `X-Vega`)
+    and grid geometry (`X-Grid-Rows-Tn`, `X-Grid-Cols-Xm`) ride in custom HTTP headers so
+    the binary body stays a pure numeric payload.
     """
     c_config = OptionConfig()
     for field, _ in config.model_fields.items():
@@ -125,7 +257,7 @@ async def price_option_full_grid(
     status, c_greeks, c_prices_surface_ptr = fdm_price_single(c_config)
     if status == -99:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="The underlying proprietary quantitative processing core license has expired."
         )
     if status != 0:
@@ -165,14 +297,32 @@ async def price_option_full_grid(
     return StreamingResponse(binary_stream, media_type="application/octet-stream", headers=headers)
 
 
-@router.post("/pricing/single", response_model=CompactGreeksResponse)
+@router.post(
+    "/pricing/single",
+    response_model=CompactGreeksResponse,
+    tags=["Pricing"],
+    summary="Price a single option and return its Greeks",
+    response_description="Compact Greeks block (price, delta, gamma, theta, vega) plus the resolved grid dimensions (Tn × Xm).",
+    responses={**AUTH_RESPONSES},
+)
 async def price_option_single(
     config: OptionConfigSchema,
-    calculate_vega: bool = Query(False, description="Compute high-precision volatility bump-and-scale passes"),
+    calculate_vega: bool = VEGA_QUERY,
 ):
     """
-    🎯 SINGLE TARGET ENGINE: Prices a single option scenario instantly, 
-    returning only the final compact Greeks layout with zero surface-grid data overhead.
+    🎯 **Single Target Engine**
+
+    Prices one option scenario with a single tight solver pass and returns **only** the
+    compact Greeks — no dense surface matrix overhead. This is the everyday endpoint for
+    quoting, what-if analysis, and low-latency single-contract valuation.
+
+    **Request body**: a single `OptionConfig` object.
+
+    **Returns**: a `CompactGreeksResponse` (`price`, `delta`, `gamma`, `theta`, `vega`)
+    plus the grid geometry (`Tn`, `Xm`) the engine resolved for the solve.
+
+    Need the full price surface or a chart instead? See `POST /v1/pricing/grid` and
+    `POST /v1/pricing/chart`.
     """
     c_config = OptionConfig()
     for field, _ in config.model_fields.items():
@@ -187,7 +337,7 @@ async def price_option_single(
     )
     if status == -99:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="The underlying proprietary quantitative processing core license has expired."
         )
     if status != 0:
@@ -203,14 +353,34 @@ async def price_option_single(
         Xm=c_greeks.Xm,
     )
     
-@router.post("/pricing/chart")
+@router.post(
+    "/pricing/chart",
+    tags=["Pricing"],
+    summary="Render the pricing surface as a 3D PNG chart",
+    response_description="A pre-rendered high-resolution PNG image of the 3D pricing surface.",
+    responses={
+        200: {
+            "description": "A `150 DPI` Matplotlib 3D surface plot of the option premium over the (τ, S) mesh.",
+            "content": {"image/png": {"schema": {"type": "string", "format": "binary"}}},
+        },
+        **AUTH_RESPONSES,
+    },
+)
 async def generate_pricing_surface_chart(
     config: OptionConfigSchema,
-    calculate_vega: bool = Query(False, description="Compute high-precision volatility passes"),
+    calculate_vega: bool = VEGA_QUERY,
 ):
     """
-    📊 ON-DEMAND VISUALIZATION ENGINE: Computes the full 2D pricing grid 
-    and returns a pre-rendered, high-resolution 3D surface chart as a raw PNG image.
+    📊 **On-Demand Visualization Engine**
+
+    Computes the full 2D pricing grid and returns a **pre-rendered** high-resolution 3D
+    surface plot as a PNG — moving the Matplotlib rendering cost server-side so thin
+    front-ends can display the surface without shipping or plotting the raw matrix.
+
+    **Request body**: a single `OptionConfig` object.
+
+    **Returns** (`image/png`): a 150 DPI `plasma`-colormap surface of option premium `V`
+    over the time-to-maturity (`τ`) and underlying spot (`S`) axes, titled by derivative type.
     """
     # 1. Reuse your working internal single-option C++ FDM solver pass
     c_config = OptionConfig()
@@ -222,7 +392,7 @@ async def generate_pricing_surface_chart(
     status, c_greeks, c_prices_surface_ptr = fdm_price_single(c_config, vega_flag)
     if status == -99:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="The underlying proprietary quantitative processing core license has expired."
         )
     if status != 0:
