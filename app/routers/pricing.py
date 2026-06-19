@@ -5,8 +5,6 @@ import structlog
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-# ✅ CRITICAL: Force Matplotlib to use a headless background backend 
-# This prevents the server from trying to open an interactive GUI window on your AWS instances!
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from app.auth.jwt import UserClaims, get_current_user
@@ -43,6 +41,11 @@ async def price_options_batch(
 
     # Execute the C++ core processing array block instantly
     status, greeks_output_vector = fdm_price_batch(configs_vector, vega_flag)
+    if status == -99:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The underlying proprietary quantitative processing core license has expired."
+        )
     if status != 0:
         raise HTTPException(status_code=500, detail="C++ core loop process failed during batch evaluation.")
 
@@ -92,7 +95,11 @@ async def price_options_binary(request: Request):
         batch_size,
         False # Default vega tracking off for speed
     )
-
+    if status == -99:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The underlying proprietary quantitative processing core license has expired."
+        )
     if status != 0:
         raise HTTPException(status_code=500, detail="C++ pricing matrix calculation crashed.")
 
@@ -119,6 +126,11 @@ async def price_option_full_grid(
         setattr(c_config, field, getattr(config, field))
 
     status, c_greeks, c_prices_surface_ptr = fdm_price_single(c_config)
+    if status == -99:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The underlying proprietary quantitative processing core license has expired."
+        )
     if status != 0:
         raise HTTPException(status_code=500, detail="C++ pricing matrix calculation crashed.")
 
@@ -177,6 +189,11 @@ async def price_option_single(
         c_config,
         vega_flag
     )
+    if status == -99:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The underlying proprietary quantitative processing core license has expired."
+        )
     if status != 0:
         raise HTTPException(status_code=500, detail="C++ single option pricing calculation crashed.")
 
@@ -208,6 +225,11 @@ async def generate_pricing_surface_chart(
     vega_flag = 1 if calculate_vega else 0
 
     status, c_greeks, c_prices_surface_ptr = fdm_price_single(c_config, vega_flag)
+    if status == -99:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The underlying proprietary quantitative processing core license has expired."
+        )
     if status != 0:
         raise HTTPException(status_code=500, detail="C++ solver matrix calculation crashed.")
 

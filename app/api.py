@@ -155,13 +155,10 @@ def fdm_price_batch(c_configs_buffer, batch_size, calc_vega: bool = False):
         ctypes.c_bool,
     ]
     fdm_lib.price_batch.restype = ctypes.c_int
-
-    return (
-        fdm_lib.price_batch(
-            ctypes.cast(c_configs_buffer, ctypes.POINTER(OptionConfig)),
-            ctypes.cast(c_greeks_buffer, ctypes.POINTER(OptionGreeks)),
-            ctypes.c_int(batch_size),
-            ctypes.c_bool(calc_vega),
-        ),
-        c_greeks_buffer,
+    status = fdm_lib.price_batch(
+        ctypes.cast(c_configs_buffer, ctypes.POINTER(OptionConfig)),
+        ctypes.cast(c_greeks_buffer, ctypes.POINTER(OptionGreeks)),
+        ctypes.c_int(batch_size),
+        ctypes.c_bool(calc_vega),
     )
+    return status, c_greeks_buffer
