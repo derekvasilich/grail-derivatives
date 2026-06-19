@@ -57,4 +57,5 @@ def test_vanilla_call_fine():
     # Theta is time-decay (highly sensitive to boundary shapes and smoothing, use an absolute buffer)
     assert fdm_greeks.theta == pytest.approx(bin_greeks.theta, abs=0.005)    
 
-# test_vanilla_call_fine()
+if __name__ == "__main__":
+    test_vanilla_call_fine()

@@ -1,7 +1,6 @@
 import pytest
 from app.api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial_all, fdm_price_batch
-from app.api import deriv_labels
-from app.tests import print_greeks
+from tests import print_greeks
 
 def test_price_batch_small():
     # 1. Generate the contiguous array class type layout (OptionConfig * 6)
@@ -61,4 +60,5 @@ def test_price_batch_small():
         # Theta is time-decay (highly sensitive to boundary shapes and smoothing, use an absolute buffer)
         assert fdm_greeks.theta == pytest.approx(bin_greeks.theta, abs=0.005)    
 
-# price_batch_small()
+if __name__ == "__main__":
+    price_batch_small()

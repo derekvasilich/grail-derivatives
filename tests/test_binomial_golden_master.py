@@ -83,4 +83,5 @@ def test_binomial_golden_master_n2048():
     parity_gap = euro_call.price - euro_put.price
     assert parity_gap == pytest.approx(0.4679, abs=5e-4)
 
-# test_binomial_golden_master_n2048()
+if __name__ == "__main__":
+    test_binomial_golden_master_n2048()

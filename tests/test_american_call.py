@@ -1,6 +1,6 @@
 import pytest
 from app.api import DerivType, OptionConfig, fdm_price_binomial, fdm_price_single
-from app.tests import print_greeks
+from tests import print_greeks
 
 def test_american_call_fine():
     # 1. Initialize the input configuration values
@@ -47,4 +47,5 @@ def test_american_call_fine():
     # Theta is time-decay (highly sensitive to boundary shapes and smoothing, use an absolute buffer)
     assert fdm_greeks.theta == pytest.approx(bin_greeks.theta, abs=0.005)      
     
-# test_american_call_fine()
+if __name__ == "__main__":    
+    test_american_call_fine()

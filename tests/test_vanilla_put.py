@@ -44,4 +44,5 @@ def test_vanilla_put_fine():
     assert greeks.gamma > 0
     assert greeks.theta > 0
 
-# test_vanilla_put_fine()
+if __name__ == "__main__":
+    test_vanilla_put_fine()
