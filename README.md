@@ -2,7 +2,7 @@
 
 [![AWS Certified Solutions Architect - Associate](https://shields.io/badge/AWS-Certified_Solutions_Architect_Associate-orange?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://amazon.com)
 [![Security Vetted](https://shields.io/badge/Security_Vetted-GoC_Secret_Level_II-red?style=for-the-badge)](#)
-[![License: Proprietary](https://shields.iobadge/License-Proprietary_Closed_Source-darkred?style=for-the-badge)](#)
+[![License: Proprietary](https://shields.io/badge/License-Proprietary_Closed_Source-darkred?style=for-the-badge)](#)
 
 
 A production-grade, high-availability Financial Engineering microservice designed to ingest high-volume derivative option contracts and orchestrate intensive mathematical valuations under extreme concurrency. This platform serves as a modern, secure cloud-native REST API wrapper executing stateless token rotation, validation, and data serialization over an elite, high-performance computing numerical matrix engine.
