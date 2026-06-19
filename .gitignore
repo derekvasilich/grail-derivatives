@@ -1,0 +1,7 @@
+build/*
+*.dSYM
+**/__pycache__
+*.o
+*.so
+*.dylib
+**/.env
