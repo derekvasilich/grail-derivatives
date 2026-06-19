@@ -10,20 +10,20 @@ A production-grade, high-availability Financial Engineering microservice designe
 > 🔒 Intellectual Property Boundary: This public repository contains the complete full-stack Python/FastAPI application layer, schema validations, OpenAPI specifications, and integration test suites. The underlying high-performance execution loops, multi-core OpenMP parallelization models, and O(N) tridiagonal numerical matrix solvers are maintained inside a proprietary, closed-source compiled machine-code shared library (.so) belonging exclusively to Dealer Gears Inc.
 
 ## 🚀 Core Architectural Moats
-## 1. High-Performance FinOps & Zero-Copy Execution
+### 1. High-Performance FinOps & Zero-Copy Execution
 Traditional JSON parsing is an extreme performance bottleneck for real-time trading desks and risk modeling engines. This API introduces a specialized binary ingress pipe:
 
 * POST /v1/pricing/binary: Bypasses JSON serialization entirely. It accepts a raw, contiguous byte stream representing native C/C++ memory arrays (OptionConfig structs) and maps them directly to the underlying engine via pointer passing, achieving absolute zero-copy execution speed.
 * POST /v1/pricing/grid: Quant Grid Engine computes the entire 2D asset-time pricing surface and streams it back to the client instantly as a raw binary float64 array, completely preventing browser memory freezing and minimizing network transfer overhead.
 
-## 2. Quantitative Matrix Math & Numerical Stability
+### 2. Quantitative Matrix Math & Numerical Stability
 The platform supports Vanilla (European) contracts alongside highly path-dependent Exotic instruments (American, Bermudan, Single Barrier, and Double Barrier options).
 
 * Crank-Nicolson Discretization: Solves continuous Black-Scholes partial differential equations (PDEs) over structured 2D asset-time meshes.
 * Rannacher Damping: Switches to fully implicit stencils for the initial temporal steps to completely damp out spurious numerical oscillations (Greeks mispricing) caused by non-smooth initial conditions at the strike boundary.
 * O(N) Solver Optimization: Resolves the resulting tridiagonal matrix using a highly optimized, linear-time Thomas Algorithm variant, minimizing hardware cache-line misses and maximizing memory bus bandwidth.
 
-## 3. Enterprise Identity Federation & Compliance
+### 3. Enterprise Identity Federation & Compliance
 Engineered for highly regulated financial sectors and corporate clearing operations:
 
 * JSON Web Key Sets (JWKS): Implements cryptographically secure, stateless identity verification by interacting directly with AWS Cognito JWKS endpoints.
@@ -54,11 +54,11 @@ Engineered for highly regulated financial sectors and corporate clearing operati
  └────────────────────────────────────────────────────────┘
 ```
 ## 🔧 Production Endpoint Matrix
-## 🎯 POST /v1/pricing/single
+### 🎯 POST /v1/pricing/single
 Prices a single option layout instantly, executing a tight computational pass and returning only the compact, final Greeks (price, delta, gamma, theta, vega) without any dense surface-mesh overhead.
-## ⚡ POST /v1/pricing/batch
+### ⚡ POST /v1/pricing/batch
 High-Throughput Sweep Pipeline: Price thousands of options concurrently over multi-core processor threads using contiguous vector streams. Features on-demand high-precision volatility bump-and-scale passes to compute exact Vega arrays.
-## 📊 POST /v1/pricing/chart
+### 📊 POST /v1/pricing/chart
 On-Demand Visualization Engine: Computes the entire multi-dimensional asset-time asset surface and streams back a pre-rendered, high-resolution 3D pricing mesh visualization as a raw PNG byte array to streamline front-end rendering overhead.
 
 ## 🛠️ Data Contract & Parameters
