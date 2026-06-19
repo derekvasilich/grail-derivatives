@@ -136,15 +136,15 @@ pytest tests/ -v
 
 System behaviors are fully orchestrated using environment variables or localized security configurations via Pydantic Settings.
 
-| Operational Variable | System Configuration Purpose | Default Factory Metric |
-| :--- | :--- | :--- |
-| `OAUTH2_JWKS_URL` | Cryptographic public key endpoint for token validation | `""` *(Dev bypass active)* |
+ Operational Variable | System Configuration Purpose | Default Factory Metric |
+|---|---|---|
+| `OAUTH2_JWKS_URL` | Cryptographic public key endpoint for token validation | `""` (dev bypass active) |
 | `OAUTH2_AUDIENCE` | Token audience enforcement validation claim | `""` |
-| `OAUTH2_ISSUER` | Token audience enforcement validation claim | `""` |
-| `OAUTH2_AUTH_URL` | Token audience enforcement validation claim | `""` |
-| `OAUTH2_TOKEN_URL` | Token audience enforcement validation claim | `""` |
+| `OAUTH2_ISSUER` | Token issuer identity validation claim | `""` |
+| `OAUTH2_AUTH_URL` | Identity provider user authorization endpoint | `""` |
+| `OAUTH2_TOKEN_URL` | Identity provider token exchange endpoint | `""` |
 | `RATE_LIMIT_RPM` | Security threshold: Max requests per token per minute | `60` |
 | `CORS_ORIGINS` | Permitted resource origins framework bounds | `*` (for local dev only!) |
-| `AWS_REGION` | Permitted resource origins framework bounds | `""` |
-| `APP_VERSION` | Permitted resource origins framework bounds | `""0.0.1""` |
-| `LOG_LEVEL` | Permitted resource origins framework bounds | `"INFO"` |
+| `AWS_REGION` | Cloud infrastructure deployment region geographic zone | `""` |
+| `APP_VERSION` | Application semantic versioning tracking identifier | `0.0.1` |
+| `LOG_LEVEL` | Application runtime message logging verbosity threshold | `"INFO"` |
