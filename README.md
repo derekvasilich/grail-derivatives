@@ -1,6 +1,6 @@
 # 🏛️ Grail Derivatives: Black-Scholes HPC FDM Pricing Engine
 
-[![AWS Certified Solutions Architect - Associate](https://shields.io/badge/AWS-Certified_Solutions_Architect_Associate-orange?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://amazon.com)
+[![AWS Certified Solutions Architect - Associate](https://shields.io/badge/AWS-Certified_Solutions_Architect_Associate-orange?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://www.credly.com/badges/0bba41aa-57e1-499d-8077-245626cc4d1d/public_url)
 [![Security Vetted](https://shields.io/badge/Security_Vetted-GoC_Secret_Level_II-red?style=for-the-badge)](#)
 [![License: Proprietary](https://shields.io/badge/License-Proprietary_Closed_Source-darkred?style=for-the-badge)](#)
 
