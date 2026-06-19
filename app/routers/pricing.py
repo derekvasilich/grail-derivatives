@@ -6,8 +6,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from fastapi.responses import StreamingResponse
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from app.auth.jwt import UserClaims, get_current_user
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from app.api import OptionConfig, fdm_price_batch, fdm_price_single
 from app.schemas.pricing import CompactGreeksResponse, OptionConfigSchema
 
@@ -15,9 +14,8 @@ router = APIRouter()
 
 @router.post("/pricing/batch", response_model=List[CompactGreeksResponse])
 async def price_options_batch(
-    payload: List[OptionConfigSchema], 
+    payload: List[OptionConfigSchema],
     calculate_vega: bool = Query(False, description="Compute high-precision volatility bump-and-scale passes"),
-    user: UserClaims = Depends(get_current_user),
 ):
     """
     ⚡ HIGH-THROUGHPUT SWEEP PIPE: Prices thousands of options concurrently 
@@ -114,7 +112,6 @@ async def price_options_binary(request: Request):
 @router.post("/pricing/grid")
 async def price_option_full_grid(
     config: OptionConfigSchema,
-    user: UserClaims = Depends(get_current_user),
 ):
     """
     🌳 QUANT GRID ENGINE: Computes the entire 2D asset-time surface
@@ -137,7 +134,7 @@ async def price_option_full_grid(
     # Calculate exact array geometry bounds
     total_elements = c_greeks.Tn * c_greeks.Xm
 
-     # 3. ✅ THE SAFE UNPACKING: Pull the raw integer address value directly!
+    # 3. ✅ THE SAFE UNPACKING: Pull the raw integer address value directly!
     raw_address = c_prices_surface_ptr.value
 
     # Security Gate: Verify the address is no longer NULL (0x0)
@@ -172,7 +169,6 @@ async def price_option_full_grid(
 async def price_option_single(
     config: OptionConfigSchema,
     calculate_vega: bool = Query(False, description="Compute high-precision volatility bump-and-scale passes"),
-    user: UserClaims = Depends(get_current_user),
 ):
     """
     🎯 SINGLE TARGET ENGINE: Prices a single option scenario instantly, 
@@ -211,7 +207,6 @@ async def price_option_single(
 async def generate_pricing_surface_chart(
     config: OptionConfigSchema,
     calculate_vega: bool = Query(False, description="Compute high-precision volatility passes"),
-    user: UserClaims = Depends(get_current_user),
 ):
     """
     📊 ON-DEMAND VISUALIZATION ENGINE: Computes the full 2D pricing grid 

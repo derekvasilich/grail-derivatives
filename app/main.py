@@ -1,6 +1,6 @@
 import structlog
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from app.middleware.rate_limit import limiter
 from app.config import settings
+from app.auth.jwt import get_current_user
 from app.routers import health, pricing
 
 app = FastAPI(
@@ -40,8 +41,14 @@ app.add_middleware(SlowAPIMiddleware)
 
 PREFIX = "/v1"
 
+# /health is wired in without auth so it stays a public liveness probe.
 app.include_router(health.router, prefix=PREFIX)
-app.include_router(pricing.router, prefix=PREFIX)
+# Every pricing route (current and future) requires a valid JWT via this single
+app.include_router(
+    pricing.router,
+    prefix=PREFIX,
+    dependencies=[Depends(get_current_user)],
+)
 
 # ============================================================
 # 3. WEB ENDPOINT ROUTING DRIVERS

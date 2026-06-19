@@ -88,6 +88,110 @@ The option schema supports native integer flag handling to route execution vecto
 * h: Spatial mesh coordinate spacing thickness (dx).
 * q: Continuous asset dividend payout yield percentage.
 
+## 🔌 Technical Integration & API Specifications
+
+All resource endpoints are mounted under the global `/v1` version prefix. With the
+exception of the unauthenticated health probe and the raw binary ingress pipe, every
+request must carry a valid AWS Cognito-issued OAuth2 JWT in the `Authorization: Bearer`
+header. The examples below assume a `localhost:8000` deployment and a `$TOKEN`
+environment variable holding your bearer token.
+
+```bash
+# Mint/export a bearer token once, then reuse it across every authenticated call below.
+# In local dev (empty OAUTH2_JWKS_URL) any unsigned JWT with a "sub" claim is accepted.
+export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### ❤️ `GET /v1/health` — Liveness & Dependency Probe
+
+```bash
+# Unauthenticated readiness check. Reports app version, uptime, and whether the
+# upstream Cognito JWKS endpoint is reachable for signature verification.
+curl -s http://localhost:8000/v1/health
+# → { "status": "ok", "version": "1.0.0-BETA", "uptime_seconds": 12.34, "authentication": "ok" }
+```
+
+### 🎯 `POST /v1/pricing/single` — Single Option Greeks
+
+```bash
+# Prices one contract and returns the compact Greeks block (price/delta/gamma/theta/vega)
+# plus the resolved grid dimensions (Tn x Xm). Append ?calculate_vega=true to run the
+# high-precision volatility bump-and-reprice pass (otherwise vega is skipped for speed).
+curl -s -X POST "http://localhost:8000/v1/pricing/single?calculate_vega=true" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "deriv": 4,
+        "s": 100.0,
+        "k": 110.0,
+        "time": 1.0,
+        "sigma": 0.5,
+        "r": 0.1,
+        "q": 0.0,
+        "Tn": 1000,
+        "h": 1.0
+      }'
+# → { "price": ..., "delta": ..., "gamma": ..., "theta": ..., "vega": ..., "Tn": 1000, "Xm": ... }
+```
+
+### ⚡ `POST /v1/pricing/batch` — High-Throughput JSON Sweep
+
+```bash
+# Prices an entire ARRAY of option configs concurrently across the OpenMP core loops.
+# The request body is a JSON list of OptionConfig objects; the response is a parallel
+# list of compact Greeks. The optional ?calculate_vega flag applies to every item.
+curl -s -X POST "http://localhost:8000/v1/pricing/batch?calculate_vega=false" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[
+        { "deriv": 0, "s": 100, "k": 110, "time": 1.0, "sigma": 0.5, "r": 0.1, "q": 0.0, "Tn": 1000, "h": 1.0 },
+        { "deriv": 1, "s": 100, "k":  90, "time": 0.5, "sigma": 0.3, "r": 0.1, "q": 0.0, "Tn": 1000, "h": 1.0 }
+      ]'
+# → [ { "price": ..., "delta": ... }, { "price": ..., "delta": ... } ]
+```
+
+### 🧬 `POST /v1/pricing/binary` — Zero-Copy Binary Ingress
+
+```bash
+# Maximum-throughput pipe: POST a raw, contiguous byte stream of packed C OptionConfig
+# structs (NOT JSON). The total payload length MUST be an exact multiple of the struct
+# size or the request is rejected with HTTP 400. The response is the raw octet-stream
+# of the computed Greeks structs, returned in the same order. Here we stream a prepared
+# binary file and capture the raw bytes to disk.
+curl -s -X POST "http://localhost:8000/v1/pricing/binary" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @configs.bin \
+  --output greeks.bin
+```
+
+### 🌳 `POST /v1/pricing/grid` — Full 2D Surface (Binary)
+
+```bash
+# Computes the entire asset-time pricing surface and streams it back as a raw float64
+# (row-major Tn x Xm) octet-stream. The scalar Greeks and grid geometry are delivered
+# out-of-band in custom X-* response headers to keep the binary payload clean.
+# Use -D to dump the headers (X-Price, X-Delta, X-Grid-Rows-Tn, X-Grid-Cols-Xm, ...).
+curl -s -X POST "http://localhost:8000/v1/pricing/grid" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "deriv": 4, "s": 100, "k": 110, "time": 1.0, "sigma": 0.5, "r": 0.1, "q": 0.0, "Tn": 1000, "h": 1.0 }' \
+  -D grid_headers.txt \
+  --output option_surface.bin
+```
+
+### 📊 `POST /v1/pricing/chart` — Rendered 3D Surface (PNG)
+
+```bash
+# Computes the pricing grid and returns a pre-rendered, high-resolution 3D surface plot
+# as a raw PNG image. Pipe the response straight to a file. Supports ?calculate_vega.
+curl -s -X POST "http://localhost:8000/v1/pricing/chart" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "deriv": 4, "s": 100, "k": 110, "time": 1.0, "sigma": 0.5, "r": 0.1, "q": 0.0, "Tn": 1000, "h": 1.0 }' \
+  --output pricing_surface.png
+```
+
 ## 🧪 Deployment & Quality Assurance
 
 * Containerization: Clean multi-stage Dockerfile pinning light production layers to support immediate horizontal scaling across AWS ECS/Fargate or Kubernetes clusters.
