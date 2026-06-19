@@ -93,7 +93,7 @@ async def price_options_batch(
     vega_flag = 1 if calculate_vega else 0
 
     # Execute the C++ core processing array block instantly
-    status, greeks_output_vector = fdm_price_batch(configs_vector, vega_flag)
+    status, greeks_output_vector = fdm_price_batch(configs_vector, batch_size, vega_flag)
     if status == -99:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
