@@ -1,10 +1,15 @@
 # 🏛️ Grail Derivatives: Black-Scholes HPC FDM Pricing Engine
 
+[![AWS Certified Solutions Architect - Associate](https://shields.io)](https://amazon.com)
+[![Security Vetted](https://shields.io)](#)
+[![License: Proprietary](https://shields.io)](#)
+
 A production-grade, high-availability Financial Engineering microservice designed to ingest high-volume derivative option contracts and orchestrate intensive mathematical valuations under extreme concurrency. This platform serves as a modern, secure cloud-native REST API wrapper executing stateless token rotation, validation, and data serialization over an elite, high-performance computing numerical matrix engine.
 
 🔒 Intellectual Property Boundary: This public repository contains the complete full-stack Python/FastAPI application layer, schema validations, OpenAPI specifications, and integration test suites. The underlying high-performance execution loops, multi-core OpenMP parallelization models, and O(N) tridiagonal numerical matrix solvers are maintained inside a proprietary, closed-source compiled machine-code shared library (.so) belonging exclusively to Dealer Gears Inc.
 
-## 🚀 Core Architectural Moats## 1. High-Performance FinOps & Zero-Copy Execution
+## 🚀 Core Architectural Moats
+## 1. High-Performance FinOps & Zero-Copy Execution
 Traditional JSON parsing is an extreme performance bottleneck for real-time trading desks and risk modeling engines. This API introduces a specialized binary ingress pipe:
 
 * POST /v1/pricing/binary: Bypasses JSON serialization entirely. It accepts a raw, contiguous byte stream representing native C/C++ memory arrays (OptionConfig structs) and maps them directly to the underlying engine via pointer passing, achieving absolute zero-copy execution speed.
