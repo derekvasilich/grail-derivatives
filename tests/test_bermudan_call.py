@@ -1,5 +1,5 @@
 import pytest
-from app.black_api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial, fdm_price_single
+from app.api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial, fdm_price_single
 from app.tests import print_greeks
 
 def test_bermudan_call_fine():

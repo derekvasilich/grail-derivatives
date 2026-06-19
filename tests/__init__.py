@@ -1,4 +1,4 @@
-from app.black_api import DerivType, OptionGreeks, deriv_labels
+from app.api import DerivType, OptionGreeks, deriv_labels
 
 
 def print_greeks(i: DerivType, fdm_greeks: OptionGreeks, bin_greeks: OptionGreeks):

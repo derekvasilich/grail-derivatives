@@ -1,5 +1,5 @@
 import pytest
-from app.black_api import DerivType, OptionConfig, fdm_price_binomial, fdm_price_single
+from app.api import DerivType, OptionConfig, fdm_price_binomial, fdm_price_single
 
 def test_vanilla_call_fine():
     # 1. Initialize the input configuration values

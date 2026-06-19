@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import pytest
-from app.black_api import deriv_labels
+from app.api import deriv_labels
 from app.routers import pricing
 from app.schemas.pricing import OptionConfigSchema
 

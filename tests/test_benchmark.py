@@ -1,6 +1,6 @@
 import time
 import random
-from app.black_api import OptionConfig, OptionGreeks, DerivType, fdm_price_batch
+from app.api import OptionConfig, OptionGreeks, DerivType, fdm_price_batch
 
 def test_production_benchmark(batch_size=10000):
     print("==================================================")

@@ -1,5 +1,5 @@
 import pytest
-from app.black_api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial_all
+from app.api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial_all
 
 def test_binomial_golden_master_n2048():
     """

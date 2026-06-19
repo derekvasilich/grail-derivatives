@@ -86,3 +86,65 @@ The option schema supports native integer flag handling to route execution vecto
 * Containerization: Clean multi-stage Dockerfile pinning light production layers to support immediate horizontal scaling across AWS ECS/Fargate or Kubernetes clusters.
 
 * Asynchronous Integration Testing: Full test suite powered by pytest, utilizing robust integration stencils to run 89 asynchronous validation tests covering memory alignment boundaries, token rotation failures, and parsing edge cases.
+
+## Repository Architecture
+
+```
+chat-agent/
+├── app/
+│   ├── auth/jwt.py          <-- OAuth2 JWKS validation for AWS Cognito
+│   ├── lib/                 <-- Proprietary .so and .dylib compiled HPC C++ OpenMP binaries
+│   ├── middleware/          <-- SlowAPI rate limiter keyed by user sub
+│   ├── routers/             <-- One router per resource group (incl. /pricing)
+│   ├── schemas/             <-- Pydantic schemas for health and pricing CRUD requests and responses
+│   ├── api.py               <-- Pydantic settings from .env
+│   ├── config.py            <-- Pydantic settings from .env
+│   └── main.py              <-- FastAPI app, CORS, and rate limiting
+├── tests/                   <-- 11 pytests including Golden Master, quadratic convergence, image regressions, and batch testing
+├── docs/                    <-- Design docs
+└── pyproject.toml           <-- main project dependencies for `uv` package manager
+```
+
+### Install & Run Locally
+
+```bash
+cd grail-derivatives
+cp .env.example .env          # fill in your API keys
+uv venv && uv pip install -e ".[test]"
+# or: python3 -m venv .venv && .venv/bin/pip install -e ".[test]"
+uvicorn app.main:app --reload
+```
+
+> **Dev auth shortcut**: leave `OAUTH2_JWKS_URL` empty in `.env` — the server accepts any JWT without verifying the signature. Generate a test token at [jwt.io](https://jwt.io) with `{"sub": "user1"}` as the payload.
+
+### Automated System Validation & Test Automation
+
+Launch the regression suite to run all asynchronous integration tests within a mocked infrastructure layout:
+
+```bash
+pytest tests/ -v
+```
+
+*Note: The test layer provisions a low-latency, in-memory SQLite instances and fully simulates external provider endpoints via `moto`, eliminating external API overhead.*
+
+### Interactive OpenAPI Documentation
+
+*   **Swagger API Framework Interface**: [http://localhost:8000/docs](http://localhost:8000/docs)
+*   **ReDoc Schema Documentation**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+
+## Global Platform Configuration Settings
+
+System behaviors are fully orchestrated using environment variables or localized security configurations via Pydantic Settings.
+
+| Operational Variable | System Configuration Purpose | Default Factory Metric |
+| :--- | :--- | :--- |
+| `OAUTH2_JWKS_URL` | Cryptographic public key endpoint for token validation | `""` *(Dev bypass active)* |
+| `OAUTH2_AUDIENCE` | Token audience enforcement validation claim | `""` |
+| `OAUTH2_ISSUER` | Token audience enforcement validation claim | `""` |
+| `OAUTH2_AUTH_URL` | Token audience enforcement validation claim | `""` |
+| `OAUTH2_TOKEN_URL` | Token audience enforcement validation claim | `""` |
+| `RATE_LIMIT_RPM` | Security threshold: Max requests per token per minute | `60` |
+| `CORS_ORIGINS` | Permitted resource origins framework bounds | `*` (for local dev only!) |
+| `AWS_REGION` | Permitted resource origins framework bounds | `""` |
+| `APP_VERSION` | Permitted resource origins framework bounds | `""0.0.1""` |
+| `LOG_LEVEL` | Permitted resource origins framework bounds | `"INFO"` |

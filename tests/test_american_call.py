@@ -1,5 +1,5 @@
 import pytest
-from app.black_api import DerivType, OptionConfig, fdm_price_binomial, fdm_price_single
+from app.api import DerivType, OptionConfig, fdm_price_binomial, fdm_price_single
 from app.tests import print_greeks
 
 def test_american_call_fine():

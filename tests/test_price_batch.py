@@ -1,6 +1,6 @@
 import pytest
-from app.black_api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial_all, fdm_price_batch
-from app.black_api import deriv_labels
+from app.api import DerivType, FrequencyType, OptionConfig, fdm_price_binomial_all, fdm_price_batch
+from app.api import deriv_labels
 from app.tests import print_greeks
 
 def test_price_batch_small():

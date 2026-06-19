@@ -3,7 +3,7 @@ import io
 import numpy as np
 import matplotlib.pyplot as plt
 
-from app.black_api import DerivType, OptionConfig, fdm_price_single
+from app.api import DerivType, OptionConfig, fdm_price_single
 
 black_scholes_exact = 13.26967658
 
