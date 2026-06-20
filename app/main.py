@@ -9,7 +9,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.middleware.rate_limit import limiter
 from app.config import settings
 from app.auth.jwt import get_current_user
-from app.routers import health, pricing
+from app.routers import health, pricing, risk
 
 API_DESCRIPTION = """
 Production-grade options valuation pipeline powered by **C++ OpenMP core loops**.
@@ -34,6 +34,11 @@ OPENAPI_TAGS = [
         "name": "Pricing",
         "description": "Option valuation endpoints — single, batch, zero-copy binary, full "
                        "surface grid, and rendered 3D chart. All require a bearer token.",
+    },
+    {
+        "name": "Risk",
+        "description": "Portfolio risk-scenario engine — stress a book across a market-factor "
+                       "grid and get per-node P&L + net Greeks. Requires a bearer token.",
     },
     {
         "name": "Health",
@@ -77,6 +82,12 @@ app.include_router(health.router, prefix=PREFIX)
 # Every pricing route (current and future) requires a valid JWT via this single
 app.include_router(
     pricing.router,
+    prefix=PREFIX,
+    dependencies=[Depends(get_current_user)],
+)
+# Risk-scenario routes are authenticated the same way.
+app.include_router(
+    risk.router,
     prefix=PREFIX,
     dependencies=[Depends(get_current_user)],
 )
