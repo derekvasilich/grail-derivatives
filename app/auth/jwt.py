@@ -59,28 +59,34 @@ async def get_current_user(
         # API Gateway puts claims here after validation
         aws_event = request.scope.get("aws.event")
         if not aws_event:
-            return await get_current_user_using_jwt(token)
+            user = await get_current_user_using_jwt(token)
+        else:
+            claims: dict = request.scope.get("aws.event", {}) \
+                            .get("requestContext", {}) \
+                            .get("authorizer", {}) \
+                            .get("claims")
 
-        claims: dict = request.scope.get("aws.event", {}) \
-                        .get("requestContext", {}) \
-                        .get("authorizer", {}) \
-                        .get("claims")
+            if not claims:
+                raise _credentials_exception("Authorizer claims missing")
 
-        if not claims:
-            raise _credentials_exception("Authorizer claims missing")
+            sub = claims.get('sub')
+            if not sub:
+                raise _credentials_exception("Authorizer claims missing")
 
-        sub = claims.get('sub')
-        if not sub:
-            raise _credentials_exception("Authorizer claims missing")
-
-        # Map these to your existing UserClaim model
-        return UserClaims(
-            sub = sub,
-            email = claims.get("email"),
-            username = claims.get("cognito:username")
-        )
+            # Map these to your existing UserClaim model
+            user = UserClaims(
+                sub = sub,
+                email = claims.get("email"),
+                username = claims.get("cognito:username")
+            )
     except Exception:
         raise _credentials_exception("Invalid session")
+
+    # Expose the resolved principal so request-scoped consumers (rate limiter,
+    # usage metering, history logging) can key on the stable Cognito `sub` claim
+    # rather than falling back to client IP.
+    request.state.user = user
+    return user
 
 async def get_current_user_using_jwt(
     token: str,
