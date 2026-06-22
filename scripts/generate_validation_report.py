@@ -62,6 +62,7 @@ TOL = {
     "euro_price_abs": 5e-2,     # vs analytic BSM
     "euro_delta_abs": 5e-3,
     "euro_gamma_abs": 5e-4,
+    "euro_vega_abs": 2e-1,      # vega is a bump-and-reprice pass → noisier than the primal solve
     "amer_price_abs": 5e-2,     # American vs high-res binomial (gated)
     "bermudan_price_warn": 1e-1,  # Bermudan vs binomial — surfaced as a finding, not gated
     "convergence_slope_min": 1.90,
@@ -73,7 +74,10 @@ TOL = {
 # Closed-form Black–Scholes–Merton (the European ground truth)
 # ------------------------------------------------------------------
 def black_scholes(s, k, t, sigma, r, q, is_call):
-    """Analytic BSM price, delta, gamma for a European option with continuous yield q."""
+    """Analytic BSM price, delta, gamma, vega for a European option with continuous yield q.
+
+    Vega is per 1.00 (100%) change in volatility — the absolute convention the engine uses.
+    """
     sqrt_t = math.sqrt(t)
     d1 = (math.log(s / k) + (r - q + 0.5 * sigma * sigma) * t) / (sigma * sqrt_t)
     d2 = d1 - sigma * sqrt_t
@@ -85,7 +89,8 @@ def black_scholes(s, k, t, sigma, r, q, is_call):
         price = k * disc_r * _N.cdf(-d2) - s * disc_q * _N.cdf(-d1)
         delta = -disc_q * _N.cdf(-d1)
     gamma = disc_q * _N.pdf(d1) / (s * sigma * sqrt_t)
-    return {"price": price, "delta": delta, "gamma": gamma}
+    vega = s * disc_q * _N.pdf(d1) * sqrt_t  # ∂V/∂σ, identical for calls and puts
+    return {"price": price, "delta": delta, "gamma": gamma, "vega": vega}
 
 
 def _make_config(deriv, s, k, t, sigma, r, q, h, tn):
@@ -102,7 +107,7 @@ def _make_config(deriv, s, k, t, sigma, r, q, h, tn):
 def run_accuracy(grid, matrix, binomial_n):
     """Sections 1 & 2: FDM vs analytic (European) and vs binomial (all 6 types)."""
     euro_rows, exotic_rows = [], []
-    euro_max = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
+    euro_max = {"price": 0.0, "delta": 0.0, "gamma": 0.0, "vega": 0.0}
     american_max_price = 0.0
     bermudan_max_price = 0.0
 
@@ -114,20 +119,26 @@ def run_accuracy(grid, matrix, binomial_n):
 
         for idx, (deriv, label, is_call) in enumerate(DERIV_ROWS):
             cfg = _make_config(deriv, s, k, t, sigma, r, q, grid["h"], grid["tn"])
-            st, fdm, _ = fdm_price_single(cfg)
+            # Request vega only for the European types (the ones validated against analytic) —
+            # the bump-and-reprice pass roughly doubles cost, so skip it for the exotic rows.
+            is_european = deriv in (DerivType.VanillaCall, DerivType.VanillaPut)
+            st, fdm, _ = fdm_price_single(cfg, is_european)
             if st != 0:
                 raise RuntimeError(f"FDM solve failed (status {st}) for {label} at {(s,k,t,sigma,r,q)}")
 
             # European → compare against the exact analytic answer.
-            if deriv in (DerivType.VanillaCall, DerivType.VanillaPut):
+            if is_european:
                 exact = black_scholes(s, k, t, sigma, r, q, is_call)
-                dp, dd, dg = abs(fdm.price - exact["price"]), abs(fdm.delta - exact["delta"]), abs(fdm.gamma - exact["gamma"])
-                euro_max["price"], euro_max["delta"], euro_max["gamma"] = (
-                    max(euro_max["price"], dp), max(euro_max["delta"], dd), max(euro_max["gamma"], dg))
+                dp, dd, dg, dv = (abs(fdm.price - exact["price"]), abs(fdm.delta - exact["delta"]),
+                                  abs(fdm.gamma - exact["gamma"]), abs(fdm.vega - exact["vega"]))
+                euro_max["price"], euro_max["delta"], euro_max["gamma"], euro_max["vega"] = (
+                    max(euro_max["price"], dp), max(euro_max["delta"], dd),
+                    max(euro_max["gamma"], dg), max(euro_max["vega"], dv))
                 euro_rows.append({"label": label, "s": s, "k": k, "t": t, "sigma": sigma,
                                   "fdm_price": fdm.price, "analytic_price": exact["price"],
                                   "abs_err": dp, "rel_err": dp / exact["price"] if exact["price"] else 0.0,
-                                  "delta_abs_err": dd, "gamma_abs_err": dg})
+                                  "delta_abs_err": dd, "gamma_abs_err": dg,
+                                  "fdm_vega": fdm.vega, "analytic_vega": exact["vega"], "vega_abs_err": dv})
 
             # All 6 types → cross-validate against the independent binomial method.
             ref = bin_ref[idx]
@@ -249,6 +260,7 @@ def run_validation(quick=False):
         "euro_price": euro["price"] <= TOL["euro_price_abs"],
         "euro_delta": euro["delta"] <= TOL["euro_delta_abs"],
         "euro_gamma": euro["gamma"] <= TOL["euro_gamma_abs"],
+        "euro_vega": euro["vega"] <= TOL["euro_vega_abs"],
         "american_price": accuracy["american_vs_binomial"]["max_price_abs_err"] <= TOL["amer_price_abs"],
         "convergence": TOL["convergence_slope_min"] <= convergence["slope"] <= TOL["convergence_slope_max"],
         "determinism": determinism["identical"],
@@ -267,17 +279,36 @@ def run_validation(quick=False):
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "grid": grid,
         "tolerances": TOL,
-        "sections": {"accuracy": accuracy, "convergence": convergence,
-                     "performance": performance, "determinism": determinism},
+        "sections": {"accuracy": accuracy, "convergence": convergence, "performance": performance, "determinism": determinism},
         "gates": gates,
         "findings": findings,
         "passed": all(gates.values()),
     }
-
+    
 
 # ------------------------------------------------------------------
 # Markdown rendering
 # ------------------------------------------------------------------
+def _vs_binomial_appendix(title, samples, labels):
+    """Render a per-scenario FDM-vs-binomial table for the given derivative-type labels."""
+    lines = [
+        f"## {title}",
+        "",
+        "Per-point FDM-vs-binomial errors (binomial = independent reference; validates theta too).",
+        "",
+        "| Type | S | K | T | σ | fdm price | binomial price | Δprice | Δdelta | Δgamma | Δtheta |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in (row for row in samples if row["label"] in labels):
+        lines.append(
+            f"| {r['label']} | {r['s']:.0f} | {r['k']:.0f} | {r['t']:.2f} | {r['sigma']:.2f} "
+            f"| {r['fdm_price']:.4f} | {r['binomial_price']:.4f} | {r['abs_err']:.2e} "
+            f"| {r['delta_abs_err']:.2e} | {r['gamma_abs_err']:.2e} | {r['theta_abs_err']:.2e} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render_markdown(report):
     acc = report["sections"]["accuracy"]
     conv = report["sections"]["convergence"]
@@ -304,6 +335,7 @@ def render_markdown(report):
         f"| Price | {euro['price']:.2e} | {report['tolerances']['euro_price_abs']:.0e} | {'✅' if report['gates']['euro_price'] else '❌'} |",
         f"| Delta | {euro['delta']:.2e} | {report['tolerances']['euro_delta_abs']:.0e} | {'✅' if report['gates']['euro_delta'] else '❌'} |",
         f"| Gamma | {euro['gamma']:.2e} | {report['tolerances']['euro_gamma_abs']:.0e} | {'✅' if report['gates']['euro_gamma'] else '❌'} |",
+        f"| Vega | {euro['vega']:.2e} | {report['tolerances']['euro_vega_abs']:.0e} | {'✅' if report['gates']['euro_vega'] else '❌'} |",
         "",
         "## 2. American & Bermudan accuracy vs. high-resolution binomial",
         "",
@@ -343,6 +375,31 @@ def render_markdown(report):
         lines += ["## ⚠️ Findings", ""]
         lines += [f"- {finding}" for finding in report["findings"]]
         lines += [""]
+
+    # Appendix: the full per-scenario European accuracy matrix (incl. vega), so a reviewer
+    # can audit every point — not just the summary maxima above.
+    samples = acc["european_vs_analytic"]["samples"]
+    lines += [
+        "## Appendix A — European accuracy, per scenario",
+        "",
+        "Per-point FDM-vs-analytic absolute errors across the full matrix.",
+        "",
+        "| Type | S | K | T | σ | Δprice | Δdelta | Δgamma | vega (fdm / analytic) | Δvega |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for row in samples:
+        lines.append(
+            f"| {row['label']} | {row['s']:.0f} | {row['k']:.0f} | {row['t']:.2f} | {row['sigma']:.2f} "
+            f"| {row['abs_err']:.2e} | {row['delta_abs_err']:.2e} | {row['gamma_abs_err']:.2e} "
+            f"| {row['fdm_vega']:.4f} / {row['analytic_vega']:.4f} | {row['vega_abs_err']:.2e} |"
+        )
+    lines += [""]
+
+    # Appendices B & C: per-scenario American / Bermudan accuracy vs. the binomial reference.
+    lines += _vs_binomial_appendix(
+        "Appendix B — American accuracy, per scenario", acc["samples"], ("American Call", "American Put"))
+    lines += _vs_binomial_appendix(
+        "Appendix C — Bermudan accuracy, per scenario", acc["samples"], ("Bermudan Call", "Bermudan Put"))
     return "\n".join(lines)
 
 

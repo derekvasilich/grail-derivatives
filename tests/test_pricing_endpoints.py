@@ -74,28 +74,19 @@ class TestSingle:
         assert body["Xm"] > 0
 
     @pytest.mark.parametrize("vega_flag", [True, False])
-    def test_calculate_vega_flag_accepted(self, client, sample_config, vega_flag):
+    def test_calculate_vega_flag_contract(self, client, sample_config, vega_flag):
+        # calculate_vega=true runs the bump-and-reprice pass → a meaningful, non-zero vega;
+        # false skips it for speed → vega returned as exactly 0.0. Magnitude threshold
+        # (rather than != 0.0) so the "on" case only passes on a genuine computed sensitivity.
         resp = client.post(
             f"{PREFIX}/single", params={"calculate_vega": vega_flag}, json=sample_config
         )
         assert resp.status_code == 200
-        # TODO(vega): only asserts the field type because the shared lib does not yet
-        # populate vega (always 0.0). See test_vega_populated_when_requested below — once
-        # vega is implemented, tighten the calculate_vega=True case to assert vega != 0.0.
-        assert isinstance(resp.json()["vega"], float)
-
-    @pytest.mark.xfail(
-        reason="TODO(vega): the shared lib does not yet compute vega — it returns 0.0 even "
-               "with calculate_vega=true. Remove this xfail once vega is implemented in libblackfdmcore.",
-        strict=False,
-    )
-    def test_vega_populated_when_requested(self, client, sample_config):
-        # When calculate_vega=true, an in-the-money-ish call should carry a meaningful vega.
-        # Magnitude threshold (rather than != 0.0) so the test only passes on a genuine
-        # computed sensitivity, not on a near-zero rounding artifact.
-        resp = client.post(f"{PREFIX}/single", params={"calculate_vega": True}, json=sample_config)
-        assert resp.status_code == 200
-        assert abs(resp.json()["vega"]) > 1e-6
+        vega = resp.json()["vega"]
+        if vega_flag:
+            assert abs(vega) > 1e-6
+        else:
+            assert vega == 0.0
 
     def test_requires_auth(self, anon_client, sample_config):
         assert anon_client.post(f"{PREFIX}/single", json=sample_config).status_code == 401
@@ -144,18 +135,14 @@ class TestBatch:
         # Element i of the response must correspond to element i of the request.
         assert body[0]["price"] < body[1]["price"]
 
-    @pytest.mark.xfail(
-        reason="TODO(vega): the shared lib does not yet compute vega — batch results return 0.0 "
-               "even with calculate_vega=true. Remove this xfail once vega is implemented in libblackfdmcore.",
-        strict=False,
-    )
-    def test_vega_populated_when_requested(self, client, sample_config):
-        # Every batch element should carry a meaningful vega when calculate_vega=true.
-        # Magnitude threshold (rather than != 0.0) so the test only passes on a genuine
-        # computed sensitivity, not on a near-zero rounding artifact.
-        resp = client.post(f"{PREFIX}/batch", params={"calculate_vega": True}, json=[sample_config])
-        assert resp.status_code == 200
-        assert all(abs(item["vega"]) > 1e-6 for item in resp.json())
+    def test_calculate_vega_flag_contract(self, client, sample_config):
+        # Mirror the single-endpoint contract across a batch: every element gets a meaningful
+        # non-zero vega when requested, and exactly 0.0 when skipped.
+        on = client.post(f"{PREFIX}/batch", params={"calculate_vega": True}, json=[sample_config])
+        off = client.post(f"{PREFIX}/batch", params={"calculate_vega": False}, json=[sample_config])
+        assert on.status_code == 200 and off.status_code == 200
+        assert all(abs(item["vega"]) > 1e-6 for item in on.json())
+        assert all(item["vega"] == 0.0 for item in off.json())
 
     def test_empty_batch_is_400(self, client):
         resp = client.post(f"{PREFIX}/batch", json=[])

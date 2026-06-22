@@ -28,9 +28,14 @@ class TestReportGeneration:
 
     def test_rigorous_gates_pass(self, report):
         # The validated comparisons (analytic + American + convergence + determinism) must hold.
-        for gate in ("euro_price", "euro_delta", "euro_gamma", "american_price", "convergence", "determinism"):
+        for gate in ("euro_price", "euro_delta", "euro_gamma", "euro_vega",
+                     "american_price", "convergence", "determinism"):
             assert report["gates"][gate] is True, f"gate {gate} regressed"
         assert report["passed"] is True
+
+    def test_vega_validated_against_analytic(self, report):
+        # Vega is now computed by the engine and checked against closed-form BSM vega.
+        assert report["sections"]["accuracy"]["european_vs_analytic"]["max_abs_err"]["vega"] <= 2e-1
 
     def test_convergence_is_second_order(self, report):
         assert 1.90 <= report["sections"]["convergence"]["slope"] <= 2.10
@@ -45,3 +50,14 @@ class TestReportGeneration:
         md = render_markdown(report)
         assert "# Grail Derivatives — Engine Validation Report" in md
         assert "European accuracy vs. closed-form Black–Scholes" in md
+        # Per-scenario appendices (European + American + Bermudan) present for thoroughness.
+        assert "Appendix A — European accuracy, per scenario" in md
+        assert "vega (fdm / analytic)" in md
+        assert "Appendix B — American accuracy, per scenario" in md
+        assert "Appendix C — Bermudan accuracy, per scenario" in md
+
+    def test_samples_carry_vega(self, report):
+        samples = report["sections"]["accuracy"]["european_vs_analytic"]["samples"]
+        assert samples, "expected per-point European samples"
+        for row in samples:
+            assert {"fdm_vega", "analytic_vega", "vega_abs_err"} <= row.keys()
