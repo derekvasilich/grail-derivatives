@@ -93,6 +93,104 @@ def black_scholes(s, k, t, sigma, r, q, is_call):
     return {"price": price, "delta": delta, "gamma": gamma, "vega": vega}
 
 
+def black_scholes_barrier(s, k, h, t, sigma, r, q, is_call, is_down, is_in):
+    """Reiner–Rubinstein closed-form price for a single-barrier option (continuous monitoring, no rebate).
+
+    Ground truth for validating the FDM barrier pricer once it lands (post x-space transform).
+    `is_down` selects a down-barrier (live region s > h) vs. up-barrier (live region s < h);
+    `is_in` selects knock-in vs. knock-out. Knock-outs are obtained by in–out parity
+    (knock_in + knock_out = vanilla, exact for zero rebate), so `out = vanilla − in`.
+
+    If spot is already on the dead side of the barrier, returns the trivially-resolved value
+    (knock-out → 0, knock-in → vanilla).
+    """
+    b = r - q                          # cost of carry
+    sst = sigma * math.sqrt(t)
+    mu = (b - 0.5 * sigma * sigma) / (sigma * sigma)
+    phi = 1.0 if is_call else -1.0     # call/put indicator
+    eta = 1.0 if is_down else -1.0     # down/up barrier indicator
+
+    vanilla = black_scholes(s, k, t, sigma, r, q, is_call)["price"]
+    breached = (s <= h) if is_down else (s >= h)
+    if breached:
+        return vanilla if is_in else 0.0
+
+    x1 = math.log(s / k) / sst + (1 + mu) * sst
+    x2 = math.log(s / h) / sst + (1 + mu) * sst
+    y1 = math.log(h * h / (s * k)) / sst + (1 + mu) * sst
+    y2 = math.log(h / s) / sst + (1 + mu) * sst
+
+    df_b, df_r = math.exp((b - r) * t), math.exp(-r * t)
+    pow_plus, pow_minus = (h / s) ** (2 * (mu + 1)), (h / s) ** (2 * mu)
+
+    # Reiner–Rubinstein building blocks. Note A (with phi) is exactly the BSM vanilla price.
+    A = phi * s * df_b * _N.cdf(phi * x1) - phi * k * df_r * _N.cdf(phi * x1 - phi * sst)
+    B = phi * s * df_b * _N.cdf(phi * x2) - phi * k * df_r * _N.cdf(phi * x2 - phi * sst)
+    C = (phi * s * df_b * pow_plus * _N.cdf(eta * y1)
+         - phi * k * df_r * pow_minus * _N.cdf(eta * y1 - eta * sst))
+    D = (phi * s * df_b * pow_plus * _N.cdf(eta * y2)
+         - phi * k * df_r * pow_minus * _N.cdf(eta * y2 - eta * sst))
+
+    # Knock-in value per Haug's standard table (rebate = 0); condition is strike vs. barrier.
+    if is_call and is_down:            # down-and-in call
+        in_val = C if k > h else (A - B + D)
+    elif is_call and not is_down:      # up-and-in call
+        in_val = A if k > h else (B - C + D)
+    elif (not is_call) and is_down:    # down-and-in put (mirrors up-and-in call)
+        in_val = (B - C + D) if k > h else A
+    else:                              # up-and-in put (mirrors down-and-in call)
+        in_val = (A - B + D) if k > h else C
+
+    return in_val if is_in else (vanilla - in_val)
+
+
+def black_scholes_double_barrier(s, k, lower, upper, t, sigma, r, q, is_call, is_in, n_terms=10):
+    """Kunitomo–Ikeda closed-form double-barrier option (flat barriers, continuous, no rebate).
+
+    The knock-out is the corridor option — alive while lower < S < upper, worthless once either
+    barrier is touched. It's a method-of-images series; n_terms images each side converges fast.
+    Knock-in via parity (in = vanilla − out). As one barrier moves to its extreme the series
+    collapses to the single-barrier (Reiner–Rubinstein) value, which the tests use as a check.
+    """
+    b = r - q
+    vsqt = sigma * math.sqrt(t)
+    drift = (b + 0.5 * sigma * sigma) * t
+    L, U, X = lower, upper, k
+
+    vanilla = black_scholes(s, k, t, sigma, r, q, is_call)["price"]
+    if s <= L or s >= U:               # already knocked out / in
+        return vanilla if is_in else 0.0
+
+    mu1 = 2.0 * b / (sigma * sigma) + 1.0   # mu3 == mu1 and mu2 == 0 for flat barriers
+    sum1 = sum2 = 0.0
+    for n in range(-n_terms, n_terms + 1):
+        U2n, L2n = U ** (2 * n), L ** (2 * n)
+        Lnp2 = L ** (2 * n + 2)
+        if is_call:
+            d1 = (math.log(s * U2n / (X * L2n)) + drift) / vsqt
+            d2 = (math.log(s * U2n / (U * L2n)) + drift) / vsqt
+            d3 = (math.log(Lnp2 / (X * s * U2n)) + drift) / vsqt
+            d4 = (math.log(Lnp2 / (U * s * U2n)) + drift) / vsqt
+        else:
+            d1 = (math.log(s * U2n / (L * L2n)) + drift) / vsqt
+            d2 = (math.log(s * U2n / (X * L2n)) + drift) / vsqt
+            d3 = (math.log(Lnp2 / (L * s * U2n)) + drift) / vsqt
+            d4 = (math.log(Lnp2 / (X * s * U2n)) + drift) / vsqt
+        ratio_a = (U ** n / L ** n) ** mu1
+        ratio_b = (L ** (n + 1) / (U ** n * s)) ** mu1
+        sum1 += ratio_a * (_N.cdf(d1) - _N.cdf(d2)) - ratio_b * (_N.cdf(d3) - _N.cdf(d4))
+        ratio_a2 = (U ** n / L ** n) ** (mu1 - 2.0)
+        ratio_b2 = (L ** (n + 1) / (U ** n * s)) ** (mu1 - 2.0)
+        sum2 += (ratio_a2 * (_N.cdf(d1 - vsqt) - _N.cdf(d2 - vsqt))
+                 - ratio_b2 * (_N.cdf(d3 - vsqt) - _N.cdf(d4 - vsqt)))
+
+    fwd = s * math.exp((b - r) * t)
+    disc = X * math.exp(-r * t)
+    out_val = (fwd * sum1 - disc * sum2) if is_call else (disc * sum2 - fwd * sum1)
+    out_val = max(out_val, 0.0)        # guard tiny negatives from series truncation
+    return (vanilla - out_val) if is_in else out_val
+
+
 def _make_config(deriv, s, k, t, sigma, r, q, h, tn):
     return OptionConfig(
         deriv=deriv, frequency=FrequencyType.Quarterly,
