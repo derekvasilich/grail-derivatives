@@ -27,7 +27,7 @@ class DummyUser:
     username = "quant_tester"
     role = "admin"
 
-def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression):
+def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression, x_min, dx):
     if image_regression:
         matplotlib.use("Agg")
 
@@ -41,9 +41,10 @@ def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression):
     # Since your linear 0.1 h-grid has 361 spatial nodes centered around S=100:
     # S_min is typically 0, S_max is derived inside your C++ library boundary rules (e.g., ~360)
     # Let's dynamically map it based on your column node count and h step thickness:
-    S_min = 0.0
-    S_max = (cols_Xm - 1) * config.h 
-    asset_axis = np.linspace(S_min, S_max, cols_Xm)
+    # X-SPACE: geometric asset axis S_m = exp(x_min + m*dx) from the engine's log grid.
+    asset_axis = np.exp(x_min + np.arange(cols_Xm) * dx)
+    S_min = float(asset_axis[0])
+    S_max = float(asset_axis[-1])
 
     # Generate the 2D coordinate mesh required for Matplotlib 3D plotting
     X_time, Y_asset = np.meshgrid(time_axis, asset_axis)
@@ -141,7 +142,9 @@ async def test_grid_endpoint(image_regression):
         
         print(f"Successfully loaded pricing surface matrix! Shape: {price_surface_2d.shape}")
         
-        plot_surface(price_surface_2d, rows, cols, image_regression)
+        x_min = float(response.headers.get("X-Log-Xmin"))
+        dx = float(response.headers.get("X-Log-Dx"))
+        plot_surface(price_surface_2d, rows, cols, image_regression, x_min, dx)
     else:
         print(f"Filed loading endpoint status code {response.status_code}")
         

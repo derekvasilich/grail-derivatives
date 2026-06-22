@@ -289,6 +289,10 @@ async def price_option_full_grid(
         "X-Vega": f"{c_greeks.vega:.8f}",
         "X-Grid-Rows-Tn": str(c_greeks.Tn),
         "X-Grid-Cols-Xm": str(c_greeks.Xm),
+        # X-SPACE: the engine solves on a uniform log-price grid. Columns are at
+        # S_m = exp(x_min + m*dx) (geometric in S). These let the client rebuild the S axis.
+        "X-Log-Xmin": f"{c_greeks.x_min:.10f}",
+        "X-Log-Dx": f"{c_greeks.dx:.10f}",
         "Content-Disposition": "attachment; filename=option_surface.bin"
     }
 
@@ -410,11 +414,13 @@ async def generate_pricing_surface_chart(
     # Reshape matching your true Row-Major layout
     price_surface_2d = surface_matrix.reshape((rows_Tn, cols_Xm))
 
-    # 3. Build coordinate meshgrid tracking geometry
+    # 3. Build coordinate meshgrid tracking geometry.
+    # X-SPACE: the engine solves on a uniform log-price grid, so the asset axis is
+    # geometric: S_m = exp(x_min + m*dx). Reconstruct the true S coordinates per column.
     time_axis = np.linspace(0.0, config.time, rows_Tn)
-    S_min = 0.0
-    S_max = (cols_Xm - 1) * config.h
-    asset_axis = np.linspace(S_min, S_max, cols_Xm)
+    asset_axis = np.exp(c_greeks.x_min + np.arange(cols_Xm) * c_greeks.dx)
+    S_min = float(asset_axis[0])
+    S_max = float(asset_axis[-1])
     X_time, Y_asset = np.meshgrid(time_axis, asset_axis)
     Z_price = price_surface_2d.T  # Transpose to mate perfectly with meshgrid shapes
 

@@ -72,6 +72,8 @@ class OptionGreeks(ctypes.Structure):
         ("gamma", ctypes.c_double),
         ("theta", ctypes.c_double),
         ("vega", ctypes.c_double),
+        ("x_min", ctypes.c_double),   # X-SPACE: log-grid origin; S axis = exp(x_min + m*dx)
+        ("dx", ctypes.c_double),      # X-SPACE: log-grid step
         ("Tn", ctypes.c_int),
         ("Xm", ctypes.c_int),
     ]
