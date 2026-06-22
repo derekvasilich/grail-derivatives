@@ -62,6 +62,7 @@ TOL = {
     "euro_price_abs": 5e-2,     # vs analytic BSM
     "euro_delta_abs": 5e-3,
     "euro_gamma_abs": 5e-4,
+    "euro_theta_abs": 1e-3,
     "euro_vega_abs": 2e-1,      # vega is a bump-and-reprice pass → noisier than the primal solve
     "amer_price_abs": 5e-2,     # American vs high-res binomial (gated)
     "bermudan_price_warn": 1e-1,  # Bermudan vs binomial — surfaced as a finding, not gated
@@ -82,15 +83,18 @@ def black_scholes(s, k, t, sigma, r, q, is_call):
     d1 = (math.log(s / k) + (r - q + 0.5 * sigma * sigma) * t) / (sigma * sqrt_t)
     d2 = d1 - sigma * sqrt_t
     disc_q, disc_r = math.exp(-q * t), math.exp(-r * t)
+    tt1, tt2 = - (s * _N.pdf(d1) * sigma) / (2.0 * sqrt_t), r * k * disc_r;
     if is_call:
         price = s * disc_q * _N.cdf(d1) - k * disc_r * _N.cdf(d2)
         delta = disc_q * _N.cdf(d1)
+        theta = (tt1 - (tt2 * _N.cdf(d2)))/365;
     else:
         price = k * disc_r * _N.cdf(-d2) - s * disc_q * _N.cdf(-d1)
         delta = -disc_q * _N.cdf(-d1)
+        theta = (tt1 + (tt2 * _N.cdf(-d2)))/356;
     gamma = disc_q * _N.pdf(d1) / (s * sigma * sqrt_t)
     vega = s * disc_q * _N.pdf(d1) * sqrt_t  # ∂V/∂σ, identical for calls and puts
-    return {"price": price, "delta": delta, "gamma": gamma, "vega": vega}
+    return {"price": price, "delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
 
 
 def black_scholes_barrier(s, k, h, t, sigma, r, q, is_call, is_down, is_in):
@@ -205,7 +209,7 @@ def _make_config(deriv, s, k, t, sigma, r, q, h, tn):
 def run_accuracy(grid, matrix, binomial_n):
     """Sections 1 & 2: FDM vs analytic (European) and vs binomial (all 6 types)."""
     euro_rows, exotic_rows = [], []
-    euro_max = {"price": 0.0, "delta": 0.0, "gamma": 0.0, "vega": 0.0}
+    euro_max = {"price": 0.0, "delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
     american_max_price = 0.0
     bermudan_max_price = 0.0
 
@@ -227,11 +231,11 @@ def run_accuracy(grid, matrix, binomial_n):
             # European → compare against the exact analytic answer.
             if is_european:
                 exact = black_scholes(s, k, t, sigma, r, q, is_call)
-                dp, dd, dg, dv = (abs(fdm.price - exact["price"]), abs(fdm.delta - exact["delta"]),
-                                  abs(fdm.gamma - exact["gamma"]), abs(fdm.vega - exact["vega"]))
-                euro_max["price"], euro_max["delta"], euro_max["gamma"], euro_max["vega"] = (
+                dp, dd, dg, dt, dv = (abs(fdm.price - exact["price"]), abs(fdm.delta - exact["delta"]),
+                                  abs(fdm.gamma - exact["gamma"]), abs(fdm.theta - exact["theta"]), abs(fdm.vega - exact["vega"]))
+                euro_max["price"], euro_max["delta"], euro_max["gamma"], euro_max["theta"], euro_max["vega"] = (
                     max(euro_max["price"], dp), max(euro_max["delta"], dd),
-                    max(euro_max["gamma"], dg), max(euro_max["vega"], dv))
+                    max(euro_max["gamma"], dg), max(euro_max["theta"], dt), max(euro_max["vega"], dv))
                 euro_rows.append({"label": label, "s": s, "k": k, "t": t, "sigma": sigma,
                                   "fdm_price": fdm.price, "analytic_price": exact["price"],
                                   "abs_err": dp, "rel_err": dp / exact["price"] if exact["price"] else 0.0,
@@ -358,6 +362,7 @@ def run_validation(quick=False):
         "euro_price": euro["price"] <= TOL["euro_price_abs"],
         "euro_delta": euro["delta"] <= TOL["euro_delta_abs"],
         "euro_gamma": euro["gamma"] <= TOL["euro_gamma_abs"],
+        "euro_theta": euro["theta"] <= TOL["euro_theta_abs"],
         "euro_vega": euro["vega"] <= TOL["euro_vega_abs"],
         "american_price": accuracy["american_vs_binomial"]["max_price_abs_err"] <= TOL["amer_price_abs"],
         "convergence": TOL["convergence_slope_min"] <= convergence["slope"] <= TOL["convergence_slope_max"],
@@ -433,6 +438,7 @@ def render_markdown(report):
         f"| Price | {euro['price']:.2e} | {report['tolerances']['euro_price_abs']:.0e} | {'✅' if report['gates']['euro_price'] else '❌'} |",
         f"| Delta | {euro['delta']:.2e} | {report['tolerances']['euro_delta_abs']:.0e} | {'✅' if report['gates']['euro_delta'] else '❌'} |",
         f"| Gamma | {euro['gamma']:.2e} | {report['tolerances']['euro_gamma_abs']:.0e} | {'✅' if report['gates']['euro_gamma'] else '❌'} |",
+        f"| Theta | {euro['theta']:.2e} | {report['tolerances']['euro_theta_abs']:.0e} | {'✅' if report['gates']['euro_theta'] else '❌'} |",
         f"| Vega | {euro['vega']:.2e} | {report['tolerances']['euro_vega_abs']:.0e} | {'✅' if report['gates']['euro_vega'] else '❌'} |",
         "",
         "## 2. American & Bermudan accuracy vs. high-resolution binomial",
