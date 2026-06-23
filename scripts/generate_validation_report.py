@@ -345,7 +345,7 @@ def _build_matrix(quick):
 def run_validation(quick=False):
     """Run every section and assemble the report dict (no file I/O except the chart)."""
     grid = {"h": 0.25, "tn": 1000}
-    perf_grid = {"h": 1.0, "tn": 300}
+    perf_grid = {"h": 1.0, "tn": 100}
     binomial_n = 1024 if quick else 2048
     out_dir = os.environ.get("VALIDATION_OUT", "validation")
     os.makedirs(out_dir, exist_ok=True)
