@@ -66,8 +66,8 @@ TOL = {
     "euro_vega_abs": 2e-1,      # vega is a bump-and-reprice pass → noisier than the primal solve
     "amer_price_abs": 5e-2,     # American vs high-res binomial (gated)
     "bermudan_price_warn": 1e-1,  # Bermudan vs binomial — surfaced as a finding, not gated
-    "convergence_slope_min": 1.90,
-    "convergence_slope_max": 2.10,
+    "convergence_slope_min": [1.90, 1.90, 1.85, 1.80, 1.75, 1.60],
+    "convergence_slope_max": [2.10, 2.10, 2.15, 2.20, 2.15, 2.40]
 }
 
 
@@ -265,34 +265,55 @@ def run_accuracy(grid, matrix, binomial_n):
 
 def run_convergence(out_dir):
     """Section 3: refine the grid for a fixed European option, estimate the slope, chart it."""
-    exact = 13.26967658  # BSM call, S=K=100, sigma=0.2, r=0.1, T=1 (matches the convergence test)
     resolutions = [1, 2, 5, 10]
     tn_steps = [100, 400, 2500, 10000]
-    nodes, errors = [], []
-    for res, tn in zip(resolutions, tn_steps):
-        cfg = _make_config(DerivType.VanillaCall, 100.0, 100.0, 1.0, 0.2, 0.1, 0.0, 1.0 / res, tn)
-        st, gr, _ = fdm_price_single(cfg)
-        if st != 0:
-            raise RuntimeError(f"convergence solve failed (status {st}) at res {res}")
-        nodes.append(res)
-        errors.append(abs(gr.price - exact))
+    results: list[dict] = [];
+    for deriv_type, deriv_name, is_call in DERIV_ROWS:
+        nodes, errors = [], []
+        for res, tn in zip(resolutions, tn_steps):
+            cfg = _make_config(deriv_type, 100.0, 100.0, 1.0, 0.2, 0.1, 0.0, 1.0 / res, tn)
+            st, gr, _ = fdm_price_single(cfg)
+            if st != 0:
+                raise RuntimeError(f"convergence solve failed (status {st}) at res {res}")
+            nodes.append(res)
+            if deriv_type == DerivType.VanillaCall or deriv_type == DerivType.VanillaPut:
+                exact = black_scholes(cfg.s, cfg.k, cfg.time, cfg.sigma, cfg.r, cfg.q, is_call)
+            else:
+                success, all_greeks = fdm_price_binomial_all(cfg, 8000)
+                greeks = all_greeks[deriv_type]
+                exact = {
+                    "price": greeks.price,
+                    "delta": greeks.delta,
+                    "gamma": greeks.gamma,
+                    "theta": greeks.theta
+                }
+            errors.append(abs(gr.price - exact["price"]))
 
-    nodes_arr, errors_arr = np.array(nodes), np.array(errors)
-    slope, _ = np.polyfit(np.log(1.0 / nodes_arr), np.log(errors_arr), 1)
+        nodes_arr, errors_arr = np.array(nodes), np.array(errors)
+        slope, _ = np.polyfit(np.log(1.0 / nodes_arr), np.log(errors_arr), 1)
 
-    chart_path = os.path.join(out_dir, "convergence.png")
-    plt.figure(figsize=(8, 6))
-    plt.loglog(nodes_arr, errors_arr, "o-", color="crimson", linewidth=2, label=f"Crank–Nicolson (slope {slope:.4f})")
-    plt.loglog(nodes_arr, errors_arr[0] * (nodes_arr[0] / nodes_arr) ** 2, "--", color="dodgerblue", label="Theoretical O(Δx²)")
-    plt.title("Convergence — error vs. grid resolution", fontsize=12, fontweight="bold")
-    plt.xlabel("Grid resolution (1/h)")
-    plt.ylabel("|FDM − analytic|")
-    plt.grid(True, which="both", ls="--", alpha=0.5)
-    plt.legend()
-    plt.savefig(chart_path, bbox_inches="tight")
-    plt.close()
+        chart_file_name = f"{deriv_name.lower().replace(' ', '-')}-convergence.png";
+        chart_path = os.path.join(out_dir, chart_file_name)
+        plt.figure(figsize=(8, 6))
+        plt.loglog(nodes_arr, errors_arr, "o-", color="crimson", linewidth=2, label=f"Crank–Nicolson (slope {slope:.4f})")
+        plt.loglog(nodes_arr, errors_arr[0] * (nodes_arr[0] / nodes_arr) ** 2, "--", color="dodgerblue", label="Theoretical O(Δx²)")
+        plt.title("Convergence — error vs. grid resolution", fontsize=12, fontweight="bold")
+        plt.xlabel("Grid resolution (1/h)")
+        plt.ylabel("|FDM − analytic|")
+        plt.grid(True, which="both", ls="--", alpha=0.5)
+        plt.legend()
+        plt.savefig(chart_path, bbox_inches="tight")
+        plt.close()
+        results.append({
+            "deriv_type": deriv_type,
+            "deriv_name": deriv_name,
+            "slope": float(slope),
+            "resolutions": nodes,
+            "errors": [float(e) for e in errors],
+            "chart": chart_file_name
+        })
 
-    return {"slope": float(slope), "resolutions": nodes, "errors": [float(e) for e in errors], "chart": "convergence.png"}
+    return results
 
 
 def run_performance(perf_grid, batch_size):
@@ -365,9 +386,12 @@ def run_validation(quick=False):
         "euro_theta": euro["theta"] <= TOL["euro_theta_abs"],
         "euro_vega": euro["vega"] <= TOL["euro_vega_abs"],
         "american_price": accuracy["american_vs_binomial"]["max_price_abs_err"] <= TOL["amer_price_abs"],
-        "convergence": TOL["convergence_slope_min"] <= convergence["slope"] <= TOL["convergence_slope_max"],
         "determinism": determinism["identical"],
     }
+    for conv in convergence:
+        deriv_type = conv["deriv_type"]
+        key = f"convergence-{deriv_type}"
+        gates[key] = bool(TOL["convergence_slope_min"][deriv_type] <= conv["slope"] <= TOL["convergence_slope_max"][deriv_type])
 
     # Findings — surfaced (not gated) discrepancies the report flags for review.
     findings = []
@@ -382,7 +406,12 @@ def run_validation(quick=False):
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "grid": grid,
         "tolerances": TOL,
-        "sections": {"accuracy": accuracy, "convergence": convergence, "performance": performance, "determinism": determinism},
+        "sections": {
+            "accuracy": accuracy, 
+            "convergence": convergence, 
+            "performance": performance, 
+            "determinism": determinism
+        },
         "gates": gates,
         "findings": findings,
         "passed": all(gates.values()),
@@ -414,7 +443,7 @@ def _vs_binomial_appendix(title, samples, labels):
 
 def render_markdown(report):
     acc = report["sections"]["accuracy"]
-    conv = report["sections"]["convergence"]
+    convergence = report["sections"]["convergence"]
     perf = report["sections"]["performance"]
     det = report["sections"]["determinism"]
     euro = acc["european_vs_analytic"]["max_abs_err"]
@@ -450,13 +479,26 @@ def render_markdown(report):
         f"- **Bermudan — max price abs error:** {acc['bermudan_vs_binomial']['max_price_abs_err']:.2e} "
         f"(warn threshold {report['tolerances']['bermudan_price_warn']:.0e}) "
         f"{'⚠️ see findings' if acc['bermudan_vs_binomial']['max_price_abs_err'] > report['tolerances']['bermudan_price_warn'] else '✅'}",
+    ]
+    lines += [
         "",
         "## 3. Convergence",
         "",
-        f"- **Estimated order (log-log slope):** {conv['slope']:.4f} "
-        f"(expected ~2.0 for Crank–Nicolson) {'✅' if report['gates']['convergence'] else '❌'}",
-        f"- Chart: `{conv['chart']}`",
+        "- **Estimated order (log-log slope):**",
         "",
+        "| Type | Slope | Tolerance | Chart | Result |" ,
+        "|---|---|---|---|---|",
+    ]
+    for conv in convergence:
+        deriv_type = conv["deriv_type"]
+        deriv_name = conv["deriv_name"]
+        key = f"convergence-{deriv_type}"
+        conv_check = report['gates'][key]
+        min = TOL["convergence_slope_min"][deriv_type]
+        max = TOL["convergence_slope_max"][deriv_type]
+        lines += [f"| {deriv_name} | {conv['slope']:.4f} | {min} <= slope <= {max} | [{conv['chart']}]({conv['chart']}) | {'✅' if conv_check else '❌'} "]
+
+    lines += [
         "## 4. Performance",
         "",
         f"- **Batch throughput:** {perf['options_per_sec']:,.0f} options/sec "

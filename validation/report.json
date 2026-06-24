@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-23T01:40:03.457415+00:00",
+  "generated_at": "2026-06-24T02:39:15.948874+00:00",
   "grid": {
     "h": 0.25,
     "tn": 1000
@@ -12,8 +12,22 @@
     "euro_vega_abs": 0.2,
     "amer_price_abs": 0.05,
     "bermudan_price_warn": 0.1,
-    "convergence_slope_min": 1.9,
-    "convergence_slope_max": 2.1
+    "convergence_slope_min": [
+      1.9,
+      1.9,
+      1.85,
+      1.8,
+      1.75,
+      1.6
+    ],
+    "convergence_slope_max": [
+      2.1,
+      2.1,
+      2.15,
+      2.2,
+      2.15,
+      2.4
+    ]
   },
   "sections": {
     "accuracy": {
@@ -3339,46 +3353,140 @@
         }
       ]
     },
-    "convergence": {
-      "slope": 2.0023095544671383,
-      "resolutions": [
-        1,
-        2,
-        5,
-        10
-      ],
-      "errors": [
-        0.09528490121176958,
-        0.02371890684202782,
-        0.0037904659469507607,
-        0.0009474505382431886
-      ],
-      "chart": "convergence.png"
-    },
+    "convergence": [
+      {
+        "deriv_type": 0,
+        "deriv_name": "European Call",
+        "slope": 2.002307574276349,
+        "resolutions": [
+          1,
+          2,
+          5,
+          10
+        ],
+        "errors": [
+          0.09528490587265459,
+          0.02371891150291283,
+          0.003790470607835772,
+          0.0009474551991281999
+        ],
+        "chart": "european-call-convergence.png"
+      },
+      {
+        "deriv_type": 1,
+        "deriv_name": "European Put",
+        "slope": 2.0280560939136745,
+        "resolutions": [
+          1,
+          2,
+          5,
+          10
+        ],
+        "errors": [
+          0.004724097278273387,
+          0.0011212897321533077,
+          0.00017675780955572762,
+          4.409509281533275e-05
+        ],
+        "chart": "european-put-convergence.png"
+      },
+      {
+        "deriv_type": 2,
+        "deriv_name": "American Call",
+        "slope": 2.1310997987257325,
+        "resolutions": [
+          1,
+          2,
+          5,
+          10
+        ],
+        "errors": [
+          0.0950238839362143,
+          0.023457889566472545,
+          0.0035294486713954853,
+          0.0006864332626879133
+        ],
+        "chart": "american-call-convergence.png"
+      },
+      {
+        "deriv_type": 3,
+        "deriv_name": "American Put",
+        "slope": 2.191334772061886,
+        "resolutions": [
+          1,
+          2,
+          5,
+          10
+        ],
+        "errors": [
+          0.02718097466026137,
+          0.0066346404986719065,
+          0.000973132421787426,
+          0.0001689116383678524
+        ],
+        "chart": "american-put-convergence.png"
+      },
+      {
+        "deriv_type": 4,
+        "deriv_name": "Bermudan Call",
+        "slope": 2.1310997987257325,
+        "resolutions": [
+          1,
+          2,
+          5,
+          10
+        ],
+        "errors": [
+          0.0950238839362143,
+          0.023457889566472545,
+          0.0035294486713954853,
+          0.0006864332626879133
+        ],
+        "chart": "bermudan-call-convergence.png"
+      },
+      {
+        "deriv_type": 5,
+        "deriv_name": "Bermudan Put",
+        "slope": 2.3179987211821778,
+        "resolutions": [
+          1,
+          2,
+          5,
+          10
+        ],
+        "errors": [
+          0.013095477169041914,
+          0.003010247931379162,
+          0.00044790234520508676,
+          5.7718643618365206e-05
+        ],
+        "chart": "bermudan-put-convergence.png"
+      }
+    ],
     "performance": {
       "grid": {
         "h": 1.0,
         "tn": 100
       },
       "batch_size": 5000,
-      "elapsed_s": 0.1725665000049048,
-      "options_per_sec": 28974.337428515304,
+      "elapsed_s": 0.20045733300503343,
+      "options_per_sec": 24942.96379706125,
       "latency_by_tn": [
         {
           "tn": 100,
-          "ms": 0.30454200168605894
+          "ms": 0.31237499933922663
         },
         {
           "tn": 500,
-          "ms": 1.3644580030813813
+          "ms": 1.6233749993261881
         },
         {
           "tn": 1000,
-          "ms": 2.5324579983134754
+          "ms": 3.293125002528541
         },
         {
           "tn": 2000,
-          "ms": 5.173874997126404
+          "ms": 6.776875001378357
         }
       ]
     },
@@ -3397,8 +3505,13 @@
     "euro_theta": true,
     "euro_vega": true,
     "american_price": true,
-    "convergence": true,
-    "determinism": true
+    "determinism": true,
+    "convergence-0": true,
+    "convergence-1": true,
+    "convergence-2": true,
+    "convergence-3": true,
+    "convergence-4": true,
+    "convergence-5": true
   },
   "findings": [],
   "passed": true
