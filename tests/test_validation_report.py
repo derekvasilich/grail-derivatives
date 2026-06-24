@@ -28,8 +28,7 @@ class TestReportGeneration:
 
     def test_rigorous_gates_pass(self, report):
         # The validated comparisons (analytic + American + convergence + determinism) must hold.
-        for gate in ("euro_price", "euro_delta", "euro_gamma", "euro_vega",
-                     "american_price", "convergence", "determinism"):
+        for gate in report["gates"]:
             assert report["gates"][gate] is True, f"gate {gate} regressed"
         assert report["passed"] is True
 
@@ -38,13 +37,22 @@ class TestReportGeneration:
         assert report["sections"]["accuracy"]["european_vs_analytic"]["max_abs_err"]["vega"] <= 2e-1
 
     def test_convergence_is_second_order(self, report):
-        assert 1.90 <= report["sections"]["convergence"]["slope"] <= 2.10
+        for key in report["sections"]["convergence"]:
+            deriv_type = key["deriv_type"]
+            min = report["tolerances"]["convergence_slope_min"][deriv_type]
+            max = report["tolerances"]["convergence_slope_max"][deriv_type]
+            assert min <= key["slope"] <= max
 
     def test_determinism_holds(self, report):
         assert report["sections"]["determinism"]["identical"] is True
 
-    def test_chart_artifact_written(self, report, tmp_path):
-        assert (tmp_path / "convergence.png").exists()
+    def test_chart_artifacts_written(self, report, tmp_path):
+        assert (tmp_path / "european-call-convergence.png").exists()
+        assert (tmp_path / "european-put-convergence.png").exists()
+        assert (tmp_path / "american-call-convergence.png").exists()
+        assert (tmp_path / "american-put-convergence.png").exists()
+        assert (tmp_path / "bermudan-call-convergence.png").exists()
+        assert (tmp_path / "bermudan-put-convergence.png").exists()
 
     def test_markdown_renders(self, report):
         md = render_markdown(report)

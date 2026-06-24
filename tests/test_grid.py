@@ -8,26 +8,15 @@ import pytest
 from app.api import deriv_labels
 from app.routers import pricing
 from app.schemas.pricing import OptionConfigSchema
+from scripts.generate_validation_report import DERIV_ROWS
 
-config = OptionConfigSchema(
-    deriv=4,        # Bermudan Call
-    Tn=100,         
-    time=1.0,       
-    h=1.0,          # Lock directly into the L1 hardware cache sweet spot
-    r=0.1, 
-    sigma=0.5, 
-    s=100.0, 
-    k=110.0,
-    q=0.0,
-    frequency=4
-)
 # 1. Create a lightweight dummy class to satisfy your UserClaims structure
 class DummyUser:
     id = 1
     username = "quant_tester"
     role = "admin"
 
-def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression, x_min, dx):
+def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression, x_min, dx, config):
     if image_regression:
         matplotlib.use("Agg")
 
@@ -99,7 +88,21 @@ def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression, x_min, dx):
     plt.close(fig)
 
 @pytest.mark.asyncio
-async def test_grid_endpoint(image_regression):
+@pytest.mark.parametrize("deriv_row", DERIV_ROWS)
+async def test_grid_endpoint(image_regression, deriv_row):
+    deriv_type, deriv_name, is_call = deriv_row
+    config = OptionConfigSchema(
+        deriv=deriv_type,        # Bermudan Call
+        Tn=100,         
+        time=1.0,       
+        h=1.0,          # Lock directly into the L1 hardware cache sweet spot
+        r=0.1, 
+        sigma=0.5, 
+        s=100.0, 
+        k=110.0,
+        q=0.0,
+        frequency=4
+    )
     response = await pricing.price_option_full_grid(config)
     raw_binary_payload = b"".join([chunk async for chunk in response.body_iterator]) if hasattr(response, 'body_iterator') else b"".join([chunk for chunk in response.iter_bytes()])
     
@@ -144,13 +147,11 @@ async def test_grid_endpoint(image_regression):
         
         x_min = float(response.headers.get("X-Log-Xmin"))
         dx = float(response.headers.get("X-Log-Dx"))
-        plot_surface(price_surface_2d, rows, cols, image_regression, x_min, dx)
+        plot_surface(price_surface_2d, rows, cols, image_regression, x_min, dx, config)
     else:
         print(f"Filed loading endpoint status code {response.status_code}")
         
 if __name__ == "__main__":
-    import asyncio
-    
     print("⏳ Launching async testing pipeline framework...")
     # ✅ THE ASYNC FIX: Feed the coroutine straight into the hardware event loop engine
-    asyncio.run(test_grid_endpoint(False))
+    test_grid_endpoint(False)
