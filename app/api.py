@@ -47,14 +47,6 @@ class FrequencyType:
 class OptionConfig(ctypes.Structure):
     _pack_ = 8
     _fields_ = [
-        ("deriv", ctypes.c_int),
-        ("barrier", ctypes.c_int),
-        ("frequency", ctypes.c_int),
-        ("Tn", ctypes.c_int),
-        ("top", ctypes.c_int),
-        ("bottom", ctypes.c_int),
-        ("left", ctypes.c_int),
-        ("right", ctypes.c_int),
         ("time", ctypes.c_double),
         ("h", ctypes.c_double),
         ("r", ctypes.c_double),
@@ -62,6 +54,16 @@ class OptionConfig(ctypes.Structure):
         ("s", ctypes.c_double),
         ("k", ctypes.c_double),
         ("q", ctypes.c_double),
+        
+        ("deriv", ctypes.c_int),
+        ("barrier", ctypes.c_int),
+        ("frequency", ctypes.c_int),
+        
+        ("Tn", ctypes.c_int),
+        ("top", ctypes.c_int),
+        ("bottom", ctypes.c_int),
+        ("left", ctypes.c_int),
+        ("right", ctypes.c_int),
     ]
 
 class OptionGreeks(ctypes.Structure):
@@ -74,6 +76,7 @@ class OptionGreeks(ctypes.Structure):
         ("vega", ctypes.c_double),
         ("x_min", ctypes.c_double),
         ("dx", ctypes.c_double),
+        
         ("Tn", ctypes.c_int),
         ("Xm", ctypes.c_int),
     ]
