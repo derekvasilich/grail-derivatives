@@ -90,18 +90,26 @@ def plot_surface(price_surface, rows_Tn, cols_Xm, image_regression, x_min, dx, c
 @pytest.mark.asyncio
 @pytest.mark.parametrize("deriv_row", DERIV_ROWS)
 async def test_grid_endpoint(image_regression, deriv_row):
-    deriv_type, deriv_name, is_call = deriv_row
+    row = deriv_row
+    deriv_type = row.deriv
+    s = 100.0
+    # Barriers need a barrier level + direction or the engine hits log(0). Levels are spot-relative
+    # (the same multipliers the validation report sweeps), so the surface stays inside the corridor.
+    b_low = row.b_low_mult * s if row.b_low_mult else 0.0
+    b_up = row.b_up_mult * s if row.b_up_mult else 0.0
     config = OptionConfigSchema(
-        deriv=deriv_type,        # Bermudan Call
-        Tn=100,         
-        time=1.0,       
+        deriv=deriv_type,
+        Tn=100,
+        time=1.0,
         h=1.0,          # Lock directly into the L1 hardware cache sweet spot
-        r=0.1, 
-        sigma=0.5, 
-        s=100.0, 
+        r=0.1,
+        sigma=0.5,
+        s=s,
         k=110.0,
         q=0.0,
-        frequency=4
+        barrier=(row.barrier_dir if row.barrier_dir is not None else 0),
+        b_low=b_low,
+        b_up=b_up,
     )
     response = await pricing.price_option_full_grid(config)
     raw_binary_payload = b"".join([chunk async for chunk in response.body_iterator]) if hasattr(response, 'body_iterator') else b"".join([chunk for chunk in response.iter_bytes()])

@@ -10,6 +10,12 @@ import math
 import numpy as np
 import pytest
 
+from app.api import (
+    BarrierType,
+    DerivType,
+    OptionConfig,
+    fdm_price_single,
+)
 from scripts.generate_validation_report import (
     black_scholes,
     black_scholes_barrier,
@@ -164,3 +170,103 @@ class TestDoubleBarrier:
         analytic = black_scholes_double_barrier(S, k, lower, upper, T, SIGMA, R, Q, is_call, is_in=False)
         mc = _mc_double_knockout(k, lower, upper, is_call)
         assert mc == pytest.approx(analytic, rel=0.02, abs=0.1)
+
+
+# ============================================================================
+# FDM engine tests. These exercise the real finite-difference barrier solver
+# (x-space, continuous monitoring with the barrier pinned on a grid node) and
+# compare against the Reiner-Rubinstein / Kunitomo-Ikeda closed forms above.
+# The closed forms are continuous-barrier, so the FDM error is pure
+# discretisation and shrinks with the grid; the tolerances reflect a fine grid.
+# ============================================================================
+
+# A fine, fast grid: dx ~ h / max(S, K) ~ 0.0025 in log-price, 600 time steps.
+_FDM_H = 0.25
+_FDM_TN = 600
+_FDM_TOL = 0.05  # a few cents; observed worst case ~0.015
+
+
+def _fdm_single_barrier(k, h_level, is_call, is_down, is_in):
+    """Price one single-barrier flavour through the FDM engine."""
+    if is_call:
+        deriv = DerivType.BarrierInCall if is_in else DerivType.BarrierOutCall
+    else:
+        deriv = DerivType.BarrierInPut if is_in else DerivType.BarrierOutPut
+    barrier = BarrierType.DownAndOut if is_down else BarrierType.UpAndOut
+    cfg = OptionConfig(
+        time=T, h=_FDM_H, r=R, sigma=SIGMA, s=S, k=k, q=Q,
+        b_low=(h_level if is_down else 0.0),
+        b_up=(0.0 if is_down else h_level),
+        deriv=deriv, barrier=barrier, Tn=_FDM_TN,
+    )
+    status, greeks, _ = fdm_price_single(cfg)
+    assert status == 0
+    return greeks.price
+
+
+def _fdm_double_barrier(k, lower, upper, is_call, is_in):
+    """Price one double-barrier flavour through the FDM engine."""
+    if is_call:
+        deriv = DerivType.DblBarrierInCall if is_in else DerivType.DblBarrierOutCall
+    else:
+        deriv = DerivType.DblBarrierInPut if is_in else DerivType.DblBarrierOutPut
+    cfg = OptionConfig(
+        time=T, h=_FDM_H, r=R, sigma=SIGMA, s=S, k=k, q=Q,
+        b_low=lower, b_up=upper, deriv=deriv, Tn=_FDM_TN,
+    )
+    status, greeks, _ = fdm_price_single(cfg)
+    assert status == 0
+    return greeks.price
+
+
+class TestFDMSingleBarrier:
+    @pytest.mark.parametrize("k,h,is_call,is_down", [
+        (100.0, 90.0, True, True),     # down-and-out call
+        (100.0, 90.0, False, True),    # down-and-out put
+        (100.0, 115.0, True, False),   # up-and-out call
+        (100.0, 115.0, False, False),  # up-and-out put
+        (120.0, 115.0, False, False),  # up-and-out put, deep-ITM (K > H)
+    ])
+    def test_knockout_matches_analytic(self, k, h, is_call, is_down):
+        fdm = _fdm_single_barrier(k, h, is_call, is_down, is_in=False)
+        analytic = black_scholes_barrier(S, k, h, T, SIGMA, R, Q, is_call, is_down, is_in=False)
+        assert fdm == pytest.approx(analytic, abs=_FDM_TOL)
+
+    @pytest.mark.parametrize("k,h,is_call,is_down", [
+        (100.0, 90.0, True, True),     # down-and-in call (priced via parity)
+        (100.0, 115.0, False, False),  # up-and-in put
+    ])
+    def test_knockin_matches_analytic(self, k, h, is_call, is_down):
+        fdm = _fdm_single_barrier(k, h, is_call, is_down, is_in=True)
+        analytic = black_scholes_barrier(S, k, h, T, SIGMA, R, Q, is_call, is_down, is_in=True)
+        assert fdm == pytest.approx(analytic, abs=_FDM_TOL)
+
+    @pytest.mark.parametrize("is_call,is_down", [
+        (True, True), (False, True), (True, False), (False, False),
+    ])
+    def test_in_out_parity_holds_in_engine(self, is_call, is_down):
+        # The engine prices knock-ins by parity, so this is exact up to FP noise.
+        k = 100.0
+        h = 90.0 if is_down else 110.0
+        ko = _fdm_single_barrier(k, h, is_call, is_down, is_in=False)
+        ki = _fdm_single_barrier(k, h, is_call, is_down, is_in=True)
+        vanilla_price = black_scholes(S, k, T, SIGMA, R, Q, is_call)["price"]
+        assert ko + ki == pytest.approx(vanilla_price, abs=_FDM_TOL)
+
+
+class TestFDMDoubleBarrier:
+    @pytest.mark.parametrize("k,lower,upper,is_call", [
+        (100.0, 85.0, 120.0, True),    # double knock-out call
+        (100.0, 85.0, 120.0, False),   # double knock-out put
+    ])
+    def test_knockout_matches_analytic(self, k, lower, upper, is_call):
+        fdm = _fdm_double_barrier(k, lower, upper, is_call, is_in=False)
+        analytic = black_scholes_double_barrier(S, k, lower, upper, T, SIGMA, R, Q, is_call, is_in=False)
+        assert fdm == pytest.approx(analytic, abs=_FDM_TOL)
+
+    @pytest.mark.parametrize("is_call", [True, False])
+    def test_in_out_parity_holds_in_engine(self, is_call):
+        ko = _fdm_double_barrier(100.0, 85.0, 120.0, is_call, is_in=False)
+        ki = _fdm_double_barrier(100.0, 85.0, 120.0, is_call, is_in=True)
+        vanilla_price = black_scholes(S, 100.0, T, SIGMA, R, Q, is_call)["price"]
+        assert ko + ki == pytest.approx(vanilla_price, abs=_FDM_TOL)

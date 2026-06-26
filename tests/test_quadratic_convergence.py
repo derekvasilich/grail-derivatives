@@ -3,8 +3,9 @@ import io
 import numpy as np
 import matplotlib.pyplot as plt
 
-from app.api import OptionConfig, fdm_price_single, fdm_price_binomial_all
-from scripts.generate_validation_report import DerivType, DERIV_ROWS, black_scholes
+from app.api import fdm_price_single, fdm_price_binomial_all
+from scripts.generate_validation_report import (
+    DerivType, DERIV_ROWS, ORACLE_BINOMIAL, config_for_row, reference_price)
 
 class TaskResult:
     def __init__(self):
@@ -18,7 +19,8 @@ def test_convergence(image_regression, deriv_row):
     resolutions = [1, 2, 5, 10]
     tn_steps = [100, 400, 2500, 10000]
     num_tasks = len(resolutions)
-    deriv_type, deriv_name, is_call = deriv_row
+    row = deriv_row
+    deriv_type, deriv_name, is_call = row.deriv, row.label, row.is_call
 
     # Allocate a contiguous array of structs that Python can share with C
     results = [TaskResult() for _ in range(num_tasks)]
@@ -27,40 +29,32 @@ def test_convergence(image_regression, deriv_row):
         results[i].rmse = 0.0
         results[i].price = 0.0
 
-    config = OptionConfig(
-        deriv=deriv_type,
-        left=0, 
-        right=0,
-        time=1.0, 
-        r=0.1, 
-        sigma=0.2, 
-        s=100.0, 
-        k=110.0,
-        q=0.0,
-    )
+    # Fixed market point for the refinement study. Each row is validated against its own
+    # independent oracle: Europeans -> analytic, American/Bermudan -> binomial, barriers ->
+    # the closed-form barrier price (so the slope measures true error decay, never FDM-vs-FDM).
+    s, k, t, sigma, r, q = 100.0, 110.0, 1.0, 0.2, 0.1, 0.0
 
-    if deriv_type == DerivType.VanillaCall or deriv_type == DerivType.VanillaPut:
-        exact = black_scholes(config.s, config.k, config.time, config.sigma, config.r, config.q, is_call)
-    else:
-        success, all_greeks = fdm_price_binomial_all(config, 8000)
-        greeks = all_greeks[deriv_type]
-        exact = {
-            "price": greeks.price,
-            "delta": greeks.delta,
-            "gamma": greeks.gamma,
-            "theta": greeks.theta
-        }
-        
+    # Helper: this test historically ran Bermudans with frequency=0 (no quarterly schedule),
+    # which fixes the binomial reference convention it converges against. Preserve that here so
+    # the slope window stays calibrated; barriers ignore frequency entirely.
+    def _conf(h, tn):
+        c = config_for_row(row, s, k, t, sigma, r, q, h, tn)
+        c.frequency = 0
+        return c
+
+    bin_ref = None
+    if row.oracle == ORACLE_BINOMIAL:
+        _, bin_ref = fdm_price_binomial_all(_conf(1.0, 100), 8000)
+    exact = reference_price(row, s, k, t, sigma, r, q, bin_ref)
+
     print(f"\n   Tn,    H,  PRICE,  EXACT,   RMSE")
     # 1. Initialize the input configuration values
     for i, res in enumerate(resolutions):
-        local_conf = OptionConfig.from_buffer_copy(config)
-        local_conf.h = 1/res
-        local_conf.Tn = tn_steps[i]
+        local_conf = _conf(1.0 / res, tn_steps[i])
         status, greeks, prices = fdm_price_single(local_conf)
-            
+
         assert status == 0
-            
+
         results[i].price = greeks.price
         results[i].rmse = np.fabs(greeks.price - exact['price'])
         print(f"{local_conf.Tn:5d}, {local_conf.h:.2f}, {greeks.price:.4f}, {exact['price']:.4f}, {results[i].rmse:.4f}")
@@ -81,8 +75,11 @@ def test_convergence(image_regression, deriv_row):
     print("=" * 60)
 
     # 5. Assert that your Crank-Nicolson/Implicit engine achieves 2nd order accuracy
-    # (Allowing a normal numerical variance window between 1.8 and 2.2)
-    if deriv_type == DerivType.BermudanPut:
+    # (Allowing a normal numerical variance window). Barriers sit exactly on a grid node and
+    # recover clean 2nd order, but the strike+barrier interaction makes the slope a touch noisier,
+    # so they get the same relaxed window as the Bermudan early-exercise row.
+    is_barrier = row.oracle in ("barrier", "dbl_barrier")
+    if deriv_type == DerivType.BermudanPut or is_barrier:
         assert 1.75 <= slope <= 2.25, f"FDM grid spatial convergence failed. Slope: {slope}"
     else:
         assert 1.95 <= slope <= 2.05, f"FDM grid spatial convergence failed. Slope: {slope}"

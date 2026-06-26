@@ -33,7 +33,11 @@ class DerivType:
 deriv_labels = {
     0: "Vanilla Call", 1: "Vanilla Put", 
     2: "American Call", 3: "American Put", 
-    4: "Bermudan Call", 5: "Bermudan Put"
+    4: "Bermudan Call", 5: "Bermudan Put",
+    6: "Barrier Out Call", 7: "Barrier Out Put",
+    8: "Barrier In Call", 9: "Barrier In Put",
+    10: "Double Barrier Out Call", 11: "Double Barrier Out Put",
+    12: "Double Barrier In Call", 13: "Double Barrier In Put",    
 }
 
 class BarrierType:
@@ -54,16 +58,18 @@ class OptionConfig(ctypes.Structure):
         ("s", ctypes.c_double),
         ("k", ctypes.c_double),
         ("q", ctypes.c_double),
-        
+        ("b_low", ctypes.c_double),   # lower barrier level (down/double); 0.0 = unused
+        ("b_up", ctypes.c_double),    # upper barrier level (up/double);   0.0 = unused
+
         ("deriv", ctypes.c_int),
         ("barrier", ctypes.c_int),
         ("frequency", ctypes.c_int),
-        
+
         ("Tn", ctypes.c_int),
         ("top", ctypes.c_int),
         ("bottom", ctypes.c_int),
-        ("left", ctypes.c_int),
-        ("right", ctypes.c_int),
+        ("left", ctypes.c_double),    # log/asset-domain lower edge (exact barrier clamp)
+        ("right", ctypes.c_double),   # log/asset-domain upper edge (exact barrier clamp)
     ]
 
 class OptionGreeks(ctypes.Structure):

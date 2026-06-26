@@ -14,9 +14,11 @@ class OptionConfigSchema(BaseModel):
     deriv: int = Field(
         ...,
         ge=0,
-        le=5,
+        le=13,
         description="Derivative type flag: 0=VanillaCall, 1=VanillaPut, 2=AmericanCall, "
-                    "3=AmericanPut, 4=BermudanCall, 5=BermudanPut.",
+                    "3=AmericanPut, 4=BermudanCall, 5=BermudanPut, "
+                    "6=BarrierOutCall, 7=BarrierOutPut, 8=BarrierInCall, 9=BarrierInPut, "
+                    "10=DblBarrierOutCall, 11=DblBarrierOutPut, 12=DblBarrierInCall, 13=DblBarrierInPut.",
         examples=[4],
     )
     Tn: int = Field(
@@ -37,6 +39,13 @@ class OptionConfigSchema(BaseModel):
     s: float = Field(100, gt=0, description="Underlying asset spot market price (S).", examples=[100.0])
     k: float = Field(110, gt=0, description="Option contractual strike target price (K).", examples=[110.0])
     q: float = Field(0.0, description="Continuous dividend payout yield (decimal, e.g. 0.02 = 2%).", examples=[0.0])
+    barrier: int = Field(
+        0, ge=0, le=1,
+        description="Single-barrier direction: 0=Up-and-out, 1=Down-and-out. "
+                    "Ignored for non-single-barrier types and double barriers.",
+    )
+    b_low: float = Field(0.0, ge=0, description="Lower barrier level (down / double barriers). 0 = unused.")
+    b_up: float = Field(0.0, ge=0, description="Upper barrier level (up / double barriers). 0 = unused.")
 
     model_config = ConfigDict(
         json_schema_extra={

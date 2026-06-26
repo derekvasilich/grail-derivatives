@@ -32,6 +32,7 @@ import math
 import os
 import sys
 import time
+from collections import namedtuple
 from datetime import datetime, timezone
 from statistics import NormalDist
 
@@ -43,19 +44,44 @@ import numpy as np
 # Allow running as a plain script (python scripts/...) by ensuring the repo root is importable.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.api import DerivType, FrequencyType, OptionConfig, fdm_price_batch, fdm_price_binomial_all, fdm_price_single  # noqa: E402
+from app.api import BarrierType, DerivType, FrequencyType, OptionConfig, fdm_price_batch, fdm_price_binomial_all, fdm_price_single  # noqa: E402
 
 _N = NormalDist()
 
-# Index/label alignment for the 6 derivative types returned by fdm_price_binomial_all.
+# Each derivative row carries which independent oracle validates it and, for barriers, the
+# barrier specification. Barrier levels are spot-RELATIVE multipliers (b_*_mult * S) so they
+# stay sensible across the accuracy sweep's varying spots/strikes.
+#   oracle: "analytic"     -> closed-form Black-Scholes (Europeans)
+#           "binomial"     -> high-resolution binomial tree (American/Bermudan)
+#           "barrier"      -> Reiner-Rubinstein single barrier closed form
+#           "dbl_barrier"  -> Kunitomo-Ikeda double barrier closed form
+# barrier_dir is the single-barrier direction (BarrierType.*) or None for non/double barriers.
+ORACLE_ANALYTIC, ORACLE_BINOMIAL, ORACLE_BARRIER, ORACLE_DBL_BARRIER = (
+    "analytic", "binomial", "barrier", "dbl_barrier")
+
+DerivRow = namedtuple("DerivRow", "deriv label is_call oracle barrier_dir b_low_mult b_up_mult")
+
 DERIV_ROWS = [
-    (DerivType.VanillaCall, "European Call", True),
-    (DerivType.VanillaPut, "European Put", False),
-    (DerivType.AmericanCall, "American Call", True),
-    (DerivType.AmericanPut, "American Put", False),
-    (DerivType.BermudanCall, "Bermudan Call", True),
-    (DerivType.BermudanPut, "Bermudan Put", False),
+    DerivRow(DerivType.VanillaCall, "European Call", True, ORACLE_ANALYTIC, None, 0.0, 0.0),
+    DerivRow(DerivType.VanillaPut, "European Put", False, ORACLE_ANALYTIC, None, 0.0, 0.0),
+    DerivRow(DerivType.AmericanCall, "American Call", True, ORACLE_BINOMIAL, None, 0.0, 0.0),
+    DerivRow(DerivType.AmericanPut, "American Put", False, ORACLE_BINOMIAL, None, 0.0, 0.0),
+    DerivRow(DerivType.BermudanCall, "Bermudan Call", True, ORACLE_BINOMIAL, None, 0.0, 0.0),
+    DerivRow(DerivType.BermudanPut, "Bermudan Put", False, ORACLE_BINOMIAL, None, 0.0, 0.0),
+    DerivRow(DerivType.BarrierOutCall, "Barrier Out Call", True, ORACLE_BARRIER, BarrierType.DownAndOut, 0.90, 0.0),
+    DerivRow(DerivType.BarrierOutPut, "Barrier Out Put", False, ORACLE_BARRIER, BarrierType.UpAndOut, 0.0, 1.15),
+    DerivRow(DerivType.BarrierInCall, "Barrier In Call", True, ORACLE_BARRIER, BarrierType.DownAndOut, 0.90, 0.0),
+    DerivRow(DerivType.BarrierInPut, "Barrier In Put", False, ORACLE_BARRIER, BarrierType.UpAndOut, 0.0, 1.15),
+    DerivRow(DerivType.DblBarrierOutCall, "Double Barrier Out Call", True, ORACLE_DBL_BARRIER, None, 0.85, 1.20),
+    DerivRow(DerivType.DblBarrierOutPut, "Double Barrier Out Put", False, ORACLE_DBL_BARRIER, None, 0.85, 1.20),
+    DerivRow(DerivType.DblBarrierInCall, "Double Barrier In Call", True, ORACLE_DBL_BARRIER, None, 0.85, 1.20),
+    DerivRow(DerivType.DblBarrierInPut, "Double Barrier In Put", False, ORACLE_DBL_BARRIER, None, 0.85, 1.20),
 ]
+
+_BARRIER_IN_TYPES = {
+    DerivType.BarrierInCall, DerivType.BarrierInPut,
+    DerivType.DblBarrierInCall, DerivType.DblBarrierInPut,
+}
 
 # Tolerance gates (errors above these fail the report). Tuned to the default report grid.
 TOL = {
@@ -66,8 +92,13 @@ TOL = {
     "euro_vega_abs": 2e-1,      # vega is a bump-and-reprice pass → noisier than the primal solve
     "amer_price_abs": 5e-2,     # American vs high-res binomial (gated)
     "bermudan_price_warn": 1e-1,  # Bermudan vs binomial — surfaced as a finding, not gated
-    "convergence_slope_min": [1.90, 1.90, 1.85, 1.80, 1.75, 1.60],
-    "convergence_slope_max": [2.10, 2.10, 2.15, 2.20, 2.15, 2.40]
+    "barrier_price_abs": 1e-1,    # barriers vs closed form (Reiner-Rubinstein / Kunitomo-Ikeda), gated
+    # Per-deriv-type convergence slope gates, indexed by DerivType value (0..13). Barriers sit
+    # exactly on a grid node + Rannacher smoothing, so they recover clean 2nd order like vanillas.
+    "convergence_slope_min": [1.90, 1.90, 1.85, 1.80, 1.75, 1.60,
+                              1.85, 1.85, 1.85, 1.85, 1.85, 1.85, 1.85, 1.85],
+    "convergence_slope_max": [2.10, 2.10, 2.15, 2.20, 2.15, 2.40,
+                              2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15, 2.15],
 }
 
 
@@ -203,15 +234,61 @@ def _make_config(deriv, s, k, t, sigma, r, q, h, tn):
     )
 
 
+def _row_barrier_levels(row, s):
+    """Absolute barrier levels for a row at spot s (0.0 where the side is unused)."""
+    return (row.b_low_mult * s if row.b_low_mult else 0.0,
+            row.b_up_mult * s if row.b_up_mult else 0.0)
+
+
+def config_for_row(row, s, k, t, sigma, r, q, h, tn):
+    """Build an OptionConfig for a DerivRow, wiring barrier direction + spot-relative levels."""
+    cfg = _make_config(row.deriv, s, k, t, sigma, r, q, h, tn)
+    if row.barrier_dir is not None:
+        cfg.barrier = row.barrier_dir
+    cfg.b_low, cfg.b_up = _row_barrier_levels(row, s)
+    return cfg
+
+
+def reference_price(row, s, k, t, sigma, r, q, binomial_ref=None):
+    """Independent oracle price (and Greeks where available) for a DerivRow.
+
+    Europeans -> analytic BSM; American/Bermudan -> the high-res binomial tree; barriers ->
+    the Reiner-Rubinstein / Kunitomo-Ikeda closed forms (price only). The binomial tree is
+    NEVER consulted for barriers (it only resolves the 6 vanilla/American/Bermudan types).
+    """
+    if row.oracle == ORACLE_ANALYTIC:
+        return black_scholes(s, k, t, sigma, r, q, row.is_call)
+    if row.oracle == ORACLE_BINOMIAL:
+        ref = binomial_ref[row.deriv]
+        return {"price": ref.price, "delta": ref.delta, "gamma": ref.gamma, "theta": ref.theta}
+
+    b_low, b_up = _row_barrier_levels(row, s)
+    is_in = row.deriv in _BARRIER_IN_TYPES
+    if row.oracle == ORACLE_BARRIER:
+        is_down = row.barrier_dir == BarrierType.DownAndOut
+        level = b_low if is_down else b_up
+        price = black_scholes_barrier(s, k, level, t, sigma, r, q, row.is_call, is_down, is_in)
+    else:  # ORACLE_DBL_BARRIER
+        price = black_scholes_double_barrier(s, k, b_low, b_up, t, sigma, r, q, row.is_call, is_in)
+    return {"price": price}
+
+
 # ------------------------------------------------------------------
 # Section runners
 # ------------------------------------------------------------------
 def run_accuracy(grid, matrix, binomial_n):
-    """Sections 1 & 2: FDM vs analytic (European) and vs binomial (all 6 types)."""
-    euro_rows, exotic_rows = [], []
+    """Sections 1 & 2: FDM vs the independent oracle for each row.
+
+    Each row is validated against the method appropriate to it: Europeans vs analytic BSM,
+    American/Bermudan vs the high-res binomial tree, and barriers vs the Reiner-Rubinstein /
+    Kunitomo-Ikeda closed forms. The binomial tree is only consulted for the 6 types it can
+    resolve, so barrier rows never index past it.
+    """
+    euro_rows, exotic_rows, barrier_rows = [], [], []
     euro_max = {"price": 0.0, "delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
     american_max_price = 0.0
     bermudan_max_price = 0.0
+    barrier_max_price = 0.0
 
     for (s, k, t, sigma, r, q) in matrix:
         base = _make_config(DerivType.VanillaCall, s, k, t, sigma, r, q, grid["h"], grid["tn"])
@@ -219,79 +296,92 @@ def run_accuracy(grid, matrix, binomial_n):
         if bin_status != 0:
             raise RuntimeError(f"binomial reference failed (status {bin_status}) at {(s,k,t,sigma,r,q)}")
 
-        for idx, (deriv, label, is_call) in enumerate(DERIV_ROWS):
-            cfg = _make_config(deriv, s, k, t, sigma, r, q, grid["h"], grid["tn"])
+        for row in DERIV_ROWS:
+            cfg = config_for_row(row, s, k, t, sigma, r, q, grid["h"], grid["tn"])
             # Request vega only for the European types (the ones validated against analytic) —
             # the bump-and-reprice pass roughly doubles cost, so skip it for the exotic rows.
-            is_european = deriv in (DerivType.VanillaCall, DerivType.VanillaPut)
+            is_european = row.oracle == ORACLE_ANALYTIC
             st, fdm, _ = fdm_price_single(cfg, is_european)
             if st != 0:
-                raise RuntimeError(f"FDM solve failed (status {st}) for {label} at {(s,k,t,sigma,r,q)}")
+                raise RuntimeError(f"FDM solve failed (status {st}) for {row.label} at {(s,k,t,sigma,r,q)}")
 
-            # European → compare against the exact analytic answer.
+            # European → compare against the exact analytic answer (price + all Greeks).
             if is_european:
-                exact = black_scholes(s, k, t, sigma, r, q, is_call)
+                exact = black_scholes(s, k, t, sigma, r, q, row.is_call)
                 dp, dd, dg, dt, dv = (abs(fdm.price - exact["price"]), abs(fdm.delta - exact["delta"]),
                                   abs(fdm.gamma - exact["gamma"]), abs(fdm.theta - exact["theta"]), abs(fdm.vega - exact["vega"]))
                 euro_max["price"], euro_max["delta"], euro_max["gamma"], euro_max["theta"], euro_max["vega"] = (
                     max(euro_max["price"], dp), max(euro_max["delta"], dd),
                     max(euro_max["gamma"], dg), max(euro_max["theta"], dt), max(euro_max["vega"], dv))
-                euro_rows.append({"label": label, "s": s, "k": k, "t": t, "sigma": sigma,
+                euro_rows.append({"label": row.label, "s": s, "k": k, "t": t, "sigma": sigma,
                                   "fdm_price": fdm.price, "analytic_price": exact["price"],
                                   "abs_err": dp, "rel_err": dp / exact["price"] if exact["price"] else 0.0,
                                   "delta_abs_err": dd, "gamma_abs_err": dg,
                                   "fdm_vega": fdm.vega, "analytic_vega": exact["vega"], "vega_abs_err": dv})
+                continue
 
-            # All 6 types → cross-validate against the independent binomial method.
-            ref = bin_ref[idx]
-            dprice = abs(fdm.price - ref.price)
-            if deriv in (DerivType.AmericanCall, DerivType.AmericanPut):
-                american_max_price = max(american_max_price, dprice)
-            elif deriv in (DerivType.BermudanCall, DerivType.BermudanPut):
-                bermudan_max_price = max(bermudan_max_price, dprice)
-            exotic_rows.append({"label": label, "s": s, "k": k, "t": t, "sigma": sigma,
-                                "fdm_price": fdm.price, "binomial_price": ref.price, "abs_err": dprice,
-                                "delta_abs_err": abs(fdm.delta - ref.delta),
-                                "gamma_abs_err": abs(fdm.gamma - ref.gamma),
-                                "theta_abs_err": abs(fdm.theta - ref.theta)})
+            # American/Bermudan → cross-validate against the independent binomial method.
+            if row.oracle == ORACLE_BINOMIAL:
+                ref = reference_price(row, s, k, t, sigma, r, q, bin_ref)
+                dprice = abs(fdm.price - ref["price"])
+                if row.deriv in (DerivType.AmericanCall, DerivType.AmericanPut):
+                    american_max_price = max(american_max_price, dprice)
+                else:
+                    bermudan_max_price = max(bermudan_max_price, dprice)
+                exotic_rows.append({"label": row.label, "s": s, "k": k, "t": t, "sigma": sigma,
+                                    "fdm_price": fdm.price, "binomial_price": ref["price"], "abs_err": dprice,
+                                    "delta_abs_err": abs(fdm.delta - ref["delta"]),
+                                    "gamma_abs_err": abs(fdm.gamma - ref["gamma"]),
+                                    "theta_abs_err": abs(fdm.theta - ref["theta"])})
+                continue
+
+            # Barriers → cross-validate against the closed-form barrier price.
+            ref = reference_price(row, s, k, t, sigma, r, q)
+            b_low, b_up = _row_barrier_levels(row, s)
+            dprice = abs(fdm.price - ref["price"])
+            barrier_max_price = max(barrier_max_price, dprice)
+            barrier_rows.append({"label": row.label, "s": s, "k": k, "t": t, "sigma": sigma,
+                                 "b_low": b_low, "b_up": b_up,
+                                 "fdm_price": fdm.price, "closed_form_price": ref["price"], "abs_err": dprice})
 
     return {
         "european_vs_analytic": {"max_abs_err": euro_max, "samples": euro_rows},
         "american_vs_binomial": {"max_price_abs_err": american_max_price, "binomial_n": binomial_n},
         "bermudan_vs_binomial": {"max_price_abs_err": bermudan_max_price, "binomial_n": binomial_n},
+        "barrier_vs_closed_form": {"max_price_abs_err": barrier_max_price, "samples": barrier_rows},
         "samples": exotic_rows,
     }
 
 
 def run_convergence(out_dir):
-    """Section 3: refine the grid for a fixed European option, estimate the slope, chart it."""
+    """Section 3: refine the grid for each derivative type, estimate the slope, chart it.
+
+    Each row converges against its own independent oracle (analytic / binomial / closed-form
+    barrier), so the slope is a true error-decay rate, not FDM-vs-FDM.
+    """
     resolutions = [1, 2, 5, 10]
     tn_steps = [100, 400, 2500, 10000]
-    results: list[dict] = [];
-    for deriv_type, deriv_name, is_call in DERIV_ROWS:
+    s, k, t, sigma, r, q = 100.0, 100.0, 1.0, 0.2, 0.1, 0.0
+    results: list[dict] = []
+    for row in DERIV_ROWS:
         nodes, errors = [], []
+        # Binomial-backed rows share one high-res reference across resolutions.
+        bin_ref = None
+        if row.oracle == ORACLE_BINOMIAL:
+            _, bin_ref = fdm_price_binomial_all(config_for_row(row, s, k, t, sigma, r, q, 1.0, 100), 8000)
         for res, tn in zip(resolutions, tn_steps):
-            cfg = _make_config(deriv_type, 100.0, 100.0, 1.0, 0.2, 0.1, 0.0, 1.0 / res, tn)
+            cfg = config_for_row(row, s, k, t, sigma, r, q, 1.0 / res, tn)
             st, gr, _ = fdm_price_single(cfg)
             if st != 0:
                 raise RuntimeError(f"convergence solve failed (status {st}) at res {res}")
             nodes.append(res)
-            if deriv_type == DerivType.VanillaCall or deriv_type == DerivType.VanillaPut:
-                exact = black_scholes(cfg.s, cfg.k, cfg.time, cfg.sigma, cfg.r, cfg.q, is_call)
-            else:
-                success, all_greeks = fdm_price_binomial_all(cfg, 8000)
-                greeks = all_greeks[deriv_type]
-                exact = {
-                    "price": greeks.price,
-                    "delta": greeks.delta,
-                    "gamma": greeks.gamma,
-                    "theta": greeks.theta
-                }
+            exact = reference_price(row, s, k, t, sigma, r, q, bin_ref)
             errors.append(abs(gr.price - exact["price"]))
 
         nodes_arr, errors_arr = np.array(nodes), np.array(errors)
         slope, _ = np.polyfit(np.log(1.0 / nodes_arr), np.log(errors_arr), 1)
 
+        deriv_type, deriv_name = row.deriv, row.label
         chart_file_name = f"{deriv_name.lower().replace(' ', '-')}-convergence.png";
         chart_path = os.path.join(out_dir, chart_file_name)
         plt.figure(figsize=(8, 6))
@@ -386,6 +476,7 @@ def run_validation(quick=False):
         "euro_theta": euro["theta"] <= TOL["euro_theta_abs"],
         "euro_vega": euro["vega"] <= TOL["euro_vega_abs"],
         "american_price": accuracy["american_vs_binomial"]["max_price_abs_err"] <= TOL["amer_price_abs"],
+        "barrier_price": accuracy["barrier_vs_closed_form"]["max_price_abs_err"] <= TOL["barrier_price_abs"],
         "determinism": determinism["identical"],
     }
     for conv in convergence:
@@ -479,6 +570,14 @@ def render_markdown(report):
         f"- **Bermudan — max price abs error:** {acc['bermudan_vs_binomial']['max_price_abs_err']:.2e} "
         f"(warn threshold {report['tolerances']['bermudan_price_warn']:.0e}) "
         f"{'⚠️ see findings' if acc['bermudan_vs_binomial']['max_price_abs_err'] > report['tolerances']['bermudan_price_warn'] else '✅'}",
+        "",
+        "## 2b. Barrier accuracy vs. closed form",
+        "",
+        "Single barriers vs. Reiner–Rubinstein, double barriers vs. Kunitomo–Ikeda (continuous "
+        "monitoring; the FDM pins each barrier on a grid node). Knock-ins are priced by in-out parity.",
+        "",
+        f"- **Barrier — max price abs error:** {acc['barrier_vs_closed_form']['max_price_abs_err']:.2e} "
+        f"(tolerance {report['tolerances']['barrier_price_abs']:.0e}) {'✅' if report['gates']['barrier_price'] else '❌'}",
     ]
     lines += [
         "",
@@ -546,6 +645,24 @@ def render_markdown(report):
         "Appendix B — American accuracy, per scenario", acc["samples"], ("American Call", "American Put"))
     lines += _vs_binomial_appendix(
         "Appendix C — Bermudan accuracy, per scenario", acc["samples"], ("Bermudan Call", "Bermudan Put"))
+
+    # Appendix D: per-scenario barrier accuracy vs. the closed-form barrier price.
+    barrier_samples = acc["barrier_vs_closed_form"]["samples"]
+    lines += [
+        "## Appendix D — Barrier accuracy, per scenario",
+        "",
+        "Per-point FDM-vs-closed-form absolute errors (Reiner–Rubinstein / Kunitomo–Ikeda).",
+        "",
+        "| Type | S | K | T | σ | b_low | b_up | fdm price | closed-form price | Δprice |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for row in barrier_samples:
+        lines.append(
+            f"| {row['label']} | {row['s']:.0f} | {row['k']:.0f} | {row['t']:.2f} | {row['sigma']:.2f} "
+            f"| {row['b_low']:.2f} | {row['b_up']:.2f} | {row['fdm_price']:.4f} | {row['closed_form_price']:.4f} "
+            f"| {row['abs_err']:.2e} |"
+        )
+    lines += [""]
     return "\n".join(lines)
 
 

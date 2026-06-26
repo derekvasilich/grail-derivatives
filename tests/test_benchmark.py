@@ -17,7 +17,10 @@ def test_production_benchmark(batch_size=10000):
     # (Forces the CPU to perform active calculations, preventing cache shortcuts)
     random.seed(42) # Anchor seed for reproducible runs
     for i in range(batch_size):
-        configs_vector[i].deriv = random.choice([DerivType.AmericanPut, DerivType.BermudanPut, DerivType.VanillaPut,DerivType.AmericanCall, DerivType.BermudanCall, DerivType.VanillaCall])
+        configs_vector[i].deriv = random.choice([
+            DerivType.AmericanPut, DerivType.BermudanPut, DerivType.VanillaPut,
+            DerivType.AmericanCall, DerivType.BermudanCall, DerivType.VanillaCall
+        ])
         configs_vector[i].Tn = 100      # Keep your optimized 1000 time steps layout
         configs_vector[i].time = random.uniform(0.5, 1.0)
         configs_vector[i].h = 1         # Keep your fast 0.1 spatial mesh layout
